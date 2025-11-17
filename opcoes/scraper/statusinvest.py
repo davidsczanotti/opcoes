@@ -92,7 +92,15 @@ def _extract_pe_from_html(html: str, symbol: str) -> Optional[float]:
             if val is not None:
                 return val
 
-    # 2) fallback rótulo textual
+    # 2) Bloco estático de indicadores (ex.: <h3>P/L</h3> ... <strong>8,52</strong>)
+    block_pattern = r"<h3[^>]*>\s*P/L\s*</h3>.*?<strong[^>]*class=\"value[^\"]*\"[^>]*>(.*?)</strong>"
+    m_block = re.search(block_pattern, html, flags=re.IGNORECASE | re.DOTALL)
+    if m_block:
+        val = _parse_float(m_block.group(1))
+        if val is not None:
+            return val
+
+    # 3) fallback rótulo textual simples
     for match in re.finditer(r"P\s*/\s*L", html, flags=re.IGNORECASE):
         start = match.end()
         window = html[start : start + 200]
@@ -143,6 +151,10 @@ def fetch_fundamentals_map(
 
     for sym in symbols:
         sym_u = sym.strip().upper()
+        is_potential_unit = sym_u.endswith("11")
+        if only_units and not is_potential_unit:
+            out[sym_u] = (None, None)
+            continue
         html = None
         for pattern in base_paths:
             url = pattern.format(sym_u)
@@ -155,18 +167,19 @@ def fetch_fundamentals_map(
             continue
 
         kind = _detect_kind(html)
-        if only_units and kind != "unit":
-            # Ignora tudo que não for Unit
-            out[sym_u] = (None, None)
-            time.sleep(max(throttle, 0.2))
-            continue
         if kind in {"etf", "indice"}:
             # Explicitamente ignorar ETFs/índices
             out[sym_u] = (None, None)
             time.sleep(max(throttle, 0.2))
             continue
+        if only_units and kind not in {"unit", "acao"}:
+            out[sym_u] = (None, None)
+            time.sleep(max(throttle, 0.2))
+            continue
 
         pe = _extract_pe_from_html(html, sym_u)
+        if pe is None:
+            print(f"Aviso: não foi possível obter P/L de {sym_u} (tipo {kind}).")
         ey = (1.0 / pe) if (pe and pe > 0) else None
         out[sym_u] = (ey, pe)
         time.sleep(max(throttle, 0.2))

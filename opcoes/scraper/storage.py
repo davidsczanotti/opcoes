@@ -35,6 +35,12 @@ CSV_FIELDS: List[str] = [
     # Indicadores opcionais (preenchidos se arquivo de fundamentos for fornecido)
     "earnings_yield_ttm",
     "pe_ttm",
+    # Derivados para checklist tático
+    "Status_Moneyness",
+    "%_Alta_p_2x",
+    "Status_2x",
+    "Status_Liquidez",
+    "Status_Theta",
 ]
 
 

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import contextlib
+import math
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from playwright.async_api import (
     TimeoutError as PlaywrightTimeoutError,
@@ -284,7 +285,7 @@ async def _collect_table_rows(page: Page, underlying: str) -> List[Dict[str, str
 
 
 def _build_row_dict(underlying: str, cells: Sequence[str]) -> Dict[str, str]:
-    return {
+    record = {
         "underlying": underlying,
         "ticker": cells[0],
         "vencimento": cells[1],
@@ -312,6 +313,8 @@ def _build_row_dict(underlying: str, cells: Sequence[str]) -> Dict[str, str]:
         "titulares": cells[23],
         "lancadores": cells[24],
     }
+    _apply_status_indicators(record)
+    return record
 
 
 async def _wait_table_update(page: Page, throttle_sec: float) -> None:
@@ -334,6 +337,130 @@ async def _wait_processing_overlay(page: Page) -> None:
 async def _wait_idle(page: Page) -> None:
     with contextlib.suppress(PlaywrightTimeoutError):
         await page.wait_for_load_state("networkidle", timeout=10000)
+
+
+def _apply_status_indicators(row: Dict[str, str]) -> None:
+    row["Status_Moneyness"] = _status_moneyness(row)
+    pct_alta, status_2x = _double_scenario(row)
+    row["%_Alta_p_2x"] = _format_decimal(pct_alta, decimals=1, signed=False)
+    row["Status_2x"] = status_2x
+    row["Status_Liquidez"] = _status_liquidez(row)
+    row["Status_Theta"] = _status_theta(row)
+
+
+def _parse_float(value: Optional[str]) -> Optional[float]:
+    if value is None:
+        return None
+    cleaned = (
+        value.strip()
+        .replace("\xa0", "")
+        .replace("\u2212", "-")
+        .replace("−", "-")
+        .replace("%", "")
+        .replace("+", "")
+    )
+    if not cleaned:
+        return None
+    cleaned = cleaned.replace(".", "").replace(",", ".").replace(" ", "")
+    if not cleaned or cleaned == "-":
+        return None
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
+def _status_moneyness(row: Dict[str, str]) -> str:
+    raw_state = (row.get("ai_otm") or "").upper()
+    if "ITM" in raw_state:
+        return "ITM"
+    dist = _parse_float(row.get("dist_perc_strike"))
+    if dist is None:
+        return ""
+    if "ATM" in raw_state and dist <= 1.0:
+        return "0-5% OTM (colada)"
+    if dist < 0:
+        return "ITM"
+    if dist <= 5:
+        return "0-5% OTM (colada)"
+    if dist <= 15:
+        return "5-15% OTM (aposta)"
+    if dist <= 20:
+        return "15-20% OTM"
+    return "20%+ OTM (loteria)"
+
+
+def _double_scenario(row: Dict[str, str]) -> Tuple[Optional[float], str]:
+    option_price = _parse_float(row.get("ultimo"))
+    delta = _parse_float(row.get("delta"))
+    strike = _parse_float(row.get("strike"))
+    dist = _parse_float(row.get("dist_perc_strike"))
+    if (
+        option_price is None
+        or option_price <= 0
+        or delta is None
+        or abs(delta) < 1e-4
+        or strike is None
+        or dist is None
+    ):
+        return None, ""
+
+    spot = _spot_from_strike_dist(strike, dist)
+    if spot is None or spot <= 0:
+        return None, ""
+
+    move_abs = option_price / abs(delta)
+    if move_abs <= 0:
+        return None, ""
+    pct = (move_abs / spot) * 100.0
+    if not math.isfinite(pct) or pct <= 0:
+        return None, ""
+
+    if pct <= 20:
+        status = "Dobra com até 20% no ativo"
+    elif pct <= 40:
+        status = "Dobra com 20-40% no ativo"
+    else:
+        status = "Precisa de 40%+ no ativo"
+    return pct, status
+
+
+def _spot_from_strike_dist(strike: float, dist: float) -> Optional[float]:
+    denom = 1 + (dist / 100.0)
+    if abs(denom) < 1e-6:
+        return None
+    return strike / denom
+
+
+def _status_liquidez(row: Dict[str, str]) -> str:
+    num_neg = _parse_float(row.get("num_neg")) or 0.0
+    vol_fin = _parse_float(row.get("vol_financeiro")) or 0.0
+    if num_neg >= 30 or vol_fin >= 50000:
+        return "Alta"
+    if num_neg >= 5 or vol_fin >= 5000:
+        return "Média"
+    if num_neg > 0 or vol_fin > 0:
+        return "Baixa"
+    return ""
+
+
+def _status_theta(row: Dict[str, str]) -> str:
+    theta = _parse_float(row.get("theta_perc"))
+    if theta is None:
+        return ""
+    abs_theta = abs(theta)
+    if abs_theta < 0.5:
+        return "Theta baixo"
+    if abs_theta < 1.0:
+        return "Theta médio"
+    return "Theta alto"
+
+
+def _format_decimal(value: Optional[float], *, decimals: int = 2, signed: bool = False) -> str:
+    if value is None or not math.isfinite(value):
+        return ""
+    fmt = f"{value:+.{decimals}f}" if signed else f"{value:.{decimals}f}"
+    return fmt.replace(".", ",")
 
 
 __all__ = ["scrape_all"]

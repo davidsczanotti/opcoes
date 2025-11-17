@@ -56,6 +56,7 @@ Notas
 - A coleta é sequencial (ritmo humano) e destinada a uma execução diária.
 - O CSV mantém unicidade por `ticker` (sem duplicatas entre execuções).
  - Quando `--fundamentals` é usado, duas novas colunas são adicionadas ao CSV: `earnings_yield_ttm` e `pe_ttm`.
+- Cada linha também traz um checklist derivado (Status_Moneyness, %_Alta_p_2x, Status_2x, Status_Liquidez e Status_Theta) para ajudar a filtrar rapidamente oportunidades com base em moneyness, liquidez, cenário para dobrar e risco de theta.
 
 
 
@@ -65,3 +66,11 @@ poetry run python -m opcoes.cli scrape \
   --proxy-server http://192.168.21.246:3128 \
   --proxy-username davidsc \
   --proxy-password 1981Card 
+
+
+
+HTTPS_PROXY="http://davidsc:1981Card@192.168.21.246:3128" \
+HTTP_PROXY="http://davidsc:1981Card@192.168.21.246:3128" \
+poetry run python -m opcoes.cli enrich \
+  --statusinvest --only-units \
+  --input data/opcoes_calls_eu.csv
