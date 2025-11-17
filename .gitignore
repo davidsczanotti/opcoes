@@ -16,3 +16,5 @@ data/flow_history.db
 
 # Secrets or config overrides
 .env
+
+objetivo.txt

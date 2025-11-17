@@ -72,17 +72,4 @@ Notas
 
 
 
-poetry run python -m opcoes.cli scrape \
-  --headful \
-  --goto-timeout 90000 \
-  --proxy-server http://192.168.21.246:3128 \
-  --proxy-username davidsc \
-  --proxy-password 1981Card 
 
-
-
-HTTPS_PROXY="http://davidsc:1981Card@192.168.21.246:3128" \
-HTTP_PROXY="http://davidsc:1981Card@192.168.21.246:3128" \
-poetry run python -m opcoes.cli enrich \
-  --statusinvest --only-units \
-  --input data/opcoes_calls_eu.csv

@@ -17,3 +17,7 @@ como a extratégia é comprar para periodos acima de um ano, precisamos manter t
 mas primeiro vamos começar pela automação de busca dos dados
 
 o ticker sera um id não tera ticker repetidos na base.
+
+
+
+
