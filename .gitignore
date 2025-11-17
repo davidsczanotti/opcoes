@@ -1,0 +1,18 @@
+# Python caches & virtualenv leftovers
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Editor/OS cruft
+.DS_Store
+
+# Poetry / environment
+.venv/
+
+# Local data artifacts
+data/opcoes_calls_eu.csv
+data/iv_history.db
+data/flow_history.db
+
+# Secrets or config overrides
+.env
