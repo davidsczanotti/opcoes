@@ -9,6 +9,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "playwright>=1.45,<2.0",
+    "yfinance (>=0.2.66,<0.3.0)",
 ]
 
 

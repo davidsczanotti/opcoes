@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import contextlib
 import math
+import statistics
+import datetime as dt
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -28,6 +30,9 @@ from .selectors import (
 from .storage import append_rows_dedup, load_existing_tickers
 from .fundamentals import load_earnings_yield_map
 from .statusinvest import fetch_fundamentals_map
+from .prices import PriceIndicators, fetch_price_indicators
+from .ivrank import IVRankStore
+from .activity import FlowStore
 
 
 MAX_VENCIMENTOS = 8
@@ -76,16 +81,36 @@ async def scrape_all(
         total_written = 0
         total_symbols = len(target_symbols)
 
+        unique_symbols = list(dict.fromkeys(target_symbols))
         # Carrega fundamentos por fonte escolhida (uma vez, antes do loop)
         if use_status_invest:
             try:
-                unique_symbols = list(dict.fromkeys(target_symbols))
                 fundamentals_map = fetch_fundamentals_map(unique_symbols)
             except Exception as exc:  # noqa: BLE001
                 print(f"Aviso: falhou Status Invest: {exc}")
                 fundamentals_map = {}
         elif fundamentals_csv:
             fundamentals_map = load_earnings_yield_map(Path(fundamentals_csv))
+        price_map: Dict[str, PriceIndicators] = {}
+        try:
+            price_map = fetch_price_indicators(unique_symbols)
+        except Exception as exc:  # noqa: BLE001
+            print(f"Aviso: falhou preço subjacente: {exc}")
+            price_map = {}
+        snapshot_date = dt.date.today().isoformat()
+        iv_store: Optional[IVRankStore] = None
+        try:
+            iv_store = IVRankStore(Path("data/iv_history.db"))
+        except Exception as exc:  # noqa: BLE001
+            print(f"Aviso: falhou inicializar histórico de IV: {exc}")
+            iv_store = None
+        flow_store: Optional[FlowStore] = None
+        try:
+            flow_store = FlowStore(Path("data/flow_history.db"))
+        except Exception as exc:  # noqa: BLE001
+            print(f"Aviso: falhou histórico de fluxo: {exc}")
+            flow_store = None
+
         for idx, symbol in enumerate(target_symbols, start=1):
             print(f"[{idx}/{total_symbols}] Processando {symbol}…")
             try:
@@ -111,12 +136,89 @@ async def scrape_all(
                 for r in rows:
                     r["earnings_yield_ttm"] = ey_str
                     r["pe_ttm"] = pe_str
+            price_info = price_map.get(symbol)
+            if price_info:
+                for r in rows:
+                    r["underlying_price"] = _format_decimal(price_info.price, decimals=2, signed=False)
+                    r["underlying_price_date"] = price_info.price_date or ""
+                    r["underlying_mm200"] = _format_decimal(price_info.mm200, decimals=2, signed=False)
+                    r["underlying_return_3m"] = _format_decimal(price_info.return_3m, decimals=2, signed=False)
+                    r["trend_flag"] = str(price_info.trend_flag) if price_info.trend_flag is not None else ""
+                    r["trend_reason"] = price_info.trend_reason
+                    cost_pct = _cost_pct(row=r, spot_price=price_info.price)
+                    r["custo_pct"] = _format_decimal(cost_pct, decimals=2, signed=False) if cost_pct is not None else ""
+            else:
+                for r in rows:
+                    r["custo_pct"] = ""
+
+            iv_summary = _summarize_iv(rows)
+            iv_ranks: Dict[Tuple[str, str], Optional[float]] = {}
+            if iv_store and iv_summary:
+                entries = [
+                    (key_underlying, key_venc, snapshot_date, value)
+                    for (key_underlying, key_venc), value in iv_summary.items()
+                    if value is not None
+                ]
+                iv_store.record_many(entries)
+                for (key_underlying, key_venc), value in iv_summary.items():
+                    if value is None:
+                        continue
+                    rank = iv_store.rank_for(key_underlying, key_venc, snapshot_date, value)
+                    iv_ranks[(key_underlying, key_venc)] = rank
+
+            flow_records: List[Tuple[str, str, Optional[float], Optional[float]]] = []
+            flow_ratios: Dict[str, Tuple[Optional[float], Optional[float]]] = {}
+            if flow_store:
+                for r in rows:
+                    ticker = _normalize_ticker(r.get("ticker"))
+                    if not ticker:
+                        continue
+                    vol = _parse_float(r.get("vol_financeiro"))
+                    num = _parse_float(r.get("num_neg"))
+                    if vol is None and num is None:
+                        continue
+                    avg_vol, avg_num = flow_store.averages(ticker, snapshot_date)
+                    ratio_vol = vol / avg_vol if avg_vol and vol is not None and avg_vol > 0 else None
+                    ratio_num = num / avg_num if avg_num and num is not None and avg_num > 0 else None
+                    flow_ratios[ticker] = (ratio_vol, ratio_num)
+                    flow_records.append((ticker, snapshot_date, vol, num))
+                flow_store.record_many(flow_records)
+
+            for r in rows:
+                ticker_key = _normalize_ticker(r.get("ticker"))
+                ratios = flow_ratios.get(ticker_key)
+                if ratios:
+                    vol_ratio, num_ratio = ratios
+                    r["vol_fluxo_5d"] = _format_decimal(vol_ratio, decimals=2, signed=False) if vol_ratio is not None else ""
+                    r["num_fluxo_5d"] = _format_decimal(num_ratio, decimals=2, signed=False) if num_ratio is not None else ""
+                else:
+                    r["vol_fluxo_5d"] = ""
+                    r["num_fluxo_5d"] = ""
+
+            for r in rows:
+                key = (_normalize_underlying(r.get("underlying")), r.get("vencimento", ""))
+                rank = iv_ranks.get(key)
+                base_total = _parse_int(r.get("score_total"))
+                if rank is not None:
+                    rank_str = _format_decimal(rank, decimals=1, signed=False)
+                    iv_pts = _score_iv(rank)
+                    r["iv_rank_180d"] = rank_str
+                    r["iv_score"] = str(iv_pts)
+                    r["score_total"] = str(base_total + iv_pts)
+                else:
+                    r["iv_rank_180d"] = ""
+                    r["iv_score"] = ""
+                    r["score_total"] = str(base_total)
 
             written = append_rows_dedup(output_csv, rows, existing_tickers)
             total_written += written
             print(f"  -> {len(rows)} linhas coletadas (novas: {written}).")
 
         await browser.close()
+        if iv_store:
+            iv_store.close()
+        if flow_store:
+            flow_store.close()
         print(f"Concluído. Novos registros gravados: {total_written}. Arquivo: {output_csv}")
 
 
@@ -354,11 +456,16 @@ def _apply_status_indicators(row: Dict[str, str]) -> None:
     l_score = _score_liquidez(status_liq)
     d_score = _score_dobro(status_2x)
     t_score = _score_theta(status_theta)
+    em_sigma, em_ratio = _em_movement(row)
+    row["em_1sigma_pct"] = _format_decimal(em_sigma, decimals=1, signed=False)
+    row["relacao_em_2x"] = _format_decimal(em_ratio, decimals=2, signed=False)
+    em_score = _score_em_ratio(em_ratio)
+    row["em2x_score"] = str(em_score)
     row["moneyness_score"] = str(m_score)
     row["liquidez_score"] = str(l_score)
     row["dobro_score"] = str(d_score)
     row["theta_score"] = str(t_score)
-    row["score_total"] = str(m_score + l_score + d_score + t_score)
+    row["score_total"] = str(m_score + l_score + d_score + t_score + em_score)
 
 
 def _parse_float(value: Optional[str]) -> Optional[float]:
@@ -504,4 +611,85 @@ def _score_theta(label: str) -> int:
     return 1 if label == "Theta baixo" else 0
 
 
+def _summarize_iv(rows: Sequence[Dict[str, str]]) -> Dict[Tuple[str, str], Optional[float]]:
+    per_key: Dict[Tuple[str, str], List[float]] = {}
+    for r in rows:
+        underlying = _normalize_underlying(r.get("underlying"))
+        venc = (r.get("vencimento") or "").strip()
+        if not underlying or not venc:
+            continue
+        vol = _parse_float(r.get("vol_impl_perc"))
+        if vol is None:
+            continue
+        key = (underlying, venc)
+        per_key.setdefault(key, []).append(vol)
+    summary: Dict[Tuple[str, str], Optional[float]] = {}
+    for key, values in per_key.items():
+        if not values:
+            continue
+        summary[key] = statistics.median(values)
+    return summary
+
+
+def _score_iv(rank: Optional[float]) -> int:
+    if rank is None:
+        return 0
+    rank = max(0.0, min(100.0, rank))
+    if 10 <= rank <= 60:
+        return 2
+    if 0 <= rank < 10 or 60 < rank <= 80:
+        return 1
+    return 0
+
+
+def _parse_int(value: Optional[str]) -> int:
+    if value is None:
+        return 0
+    try:
+        return int(str(value).strip())
+    except ValueError:
+        return 0
+
+
+def _em_movement(row: Dict[str, str]) -> Tuple[Optional[float], Optional[float]]:
+    vol = _parse_float(row.get("vol_impl_perc"))
+    days = _parse_float(row.get("dias_uteis"))
+    pct_to_double = _parse_float(row.get("%_Alta_p_2x"))
+    if vol is None or days is None or days <= 0:
+        return None, None
+    em_sigma = (vol / 100.0) * math.sqrt(days / 252.0) * 100.0
+    ratio = None
+    if pct_to_double is not None and pct_to_double > 0:
+        ratio = em_sigma / pct_to_double
+    return em_sigma, ratio
+
+
+def _score_em_ratio(ratio: Optional[float]) -> int:
+    if ratio is None:
+        return 0
+    if ratio >= 1.0:
+        return 2
+    if ratio >= 0.5:
+        return 1
+    return 0
+
+
+def _normalize_underlying(value: Optional[str]) -> str:
+    return (value or "").strip().upper()
+
+
+def _normalize_ticker(value: Optional[str]) -> str:
+    return (value or "").strip().upper()
+
+
+def _cost_pct(row: Dict[str, str], spot_price: Optional[float]) -> Optional[float]:
+    if spot_price is None or spot_price <= 0:
+        return None
+    option_price = _parse_float(row.get("ultimo"))
+    if option_price is None:
+        return None
+    return (option_price / spot_price) * 100.0
+
+
+__all__ = ["scrape_all"]
 __all__ = ["scrape_all"]

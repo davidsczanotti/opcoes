@@ -32,6 +32,14 @@ CSV_FIELDS: List[str] = [
     "descoberto",
     "titulares",
     "lancadores",
+    # Medidas do subjacente
+    "underlying_price",
+    "underlying_price_date",
+    "underlying_mm200",
+    "underlying_return_3m",
+    "trend_flag",
+    "trend_reason",
+    "custo_pct",
     # Indicadores opcionais (preenchidos se arquivo de fundamentos for fornecido)
     "earnings_yield_ttm",
     "pe_ttm",
@@ -46,6 +54,13 @@ CSV_FIELDS: List[str] = [
     "dobro_score",
     "theta_score",
     "score_total",
+    "iv_rank_180d",
+    "iv_score",
+    "em_1sigma_pct",
+    "relacao_em_2x",
+    "em2x_score",
+    "vol_fluxo_5d",
+    "num_fluxo_5d",
 ]
 
 

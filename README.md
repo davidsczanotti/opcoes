@@ -57,12 +57,18 @@ Notas
 - O CSV mantém unicidade por `ticker` (sem duplicatas entre execuções).
  - Quando `--fundamentals` é usado, duas novas colunas são adicionadas ao CSV: `earnings_yield_ttm` e `pe_ttm`.
 - Cada linha também traz um checklist derivado (Status_Moneyness, %_Alta_p_2x, Status_2x, Status_Liquidez e Status_Theta) para ajudar a filtrar rapidamente oportunidades com base em moneyness, liquidez, cenário para dobrar e risco de theta.
-- Para priorização rápida, o CSV calcula `moneyness_score`, `liquidez_score`, `dobro_score`, `theta_score` e `score_total` (soma). As regras são:
+- O scraper captura um snapshot diário do ativo-objeto via Yahoo Finance (preço, data do último fechamento, MM200 e retorno de 3 meses) e deriva `trend_flag`/`trend_reason`. Use `trend_flag=1` como gate para descartar calls cujos subjacentes estejam abaixo da MM200 e com retorno 3m negativo.
+- Cada vencimento ganha um histórico diário de IV (via SQLite) para calcular `iv_rank_180d` (0–100) e `iv_score`. Assim fica fácil evitar calls caras: priorize `iv_score >= 1` ou `iv_rank` intermediário (aprox. 10–60).
+- A planilha também traz `em_1sigma_pct`, `relacao_em_2x` e `em2x_score`, comparando o movimento implícito (1σ até o vencimento) com o movimento que você precisa para dobrar a opção. Use `relacao_em_2x >= 1` ou `em2x_score >= 1` para focar nas estruturas com cenário de 2x compatível com o que a curva de vol já precifica.
+- Indicadores adicionais: `custo_pct` (custo da call sobre o ativo), `vol_fluxo_5d` e `num_fluxo_5d` (ratio vs. média móvel 5 dias de volume financeiro e negócios, usando `data/flow_history.db`). Eles ajudam a avaliar payoff vs. spot e detectar fluxo anômalo.
+- Para priorização rápida, o CSV calcula `moneyness_score`, `liquidez_score`, `dobro_score`, `theta_score`, `iv_score` e `score_total` (soma). As regras são:
   - Moneyness: 2 pts se está em `0-5% OTM (colada)`, 1 pt se `5-15% OTM (aposta)`.
   - Liquidez: 2 pts para Status_Liquidez = Alta, 1 pt para Média.
   - Dobro (`Status_2x`): 2 pts até 20% no ativo, 1 pt se 20–40%.
   - Theta: 1 pt se `Theta baixo`.
-  - `score_total` varia de 0 a 7 para ordenar rapidamente os melhores trades dentro do checklist.
+  - IV Rank: 2 pts se `iv_rank_180d` está entre 10–60, 1 pt se 0–10 ou 60–80.
+  - Movimento implícito x 2x: 2 pts se `relacao_em_2x >= 1`, 1 pt se entre 0,5 e 1.
+  - `score_total` varia de 0 a 11 para ordenar rapidamente os melhores trades dentro do checklist completo.
 
 
 
