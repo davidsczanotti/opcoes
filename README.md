@@ -57,6 +57,12 @@ Notas
 - O CSV mantém unicidade por `ticker` (sem duplicatas entre execuções).
  - Quando `--fundamentals` é usado, duas novas colunas são adicionadas ao CSV: `earnings_yield_ttm` e `pe_ttm`.
 - Cada linha também traz um checklist derivado (Status_Moneyness, %_Alta_p_2x, Status_2x, Status_Liquidez e Status_Theta) para ajudar a filtrar rapidamente oportunidades com base em moneyness, liquidez, cenário para dobrar e risco de theta.
+- Para priorização rápida, o CSV calcula `moneyness_score`, `liquidez_score`, `dobro_score`, `theta_score` e `score_total` (soma). As regras são:
+  - Moneyness: 2 pts se está em `0-5% OTM (colada)`, 1 pt se `5-15% OTM (aposta)`.
+  - Liquidez: 2 pts para Status_Liquidez = Alta, 1 pt para Média.
+  - Dobro (`Status_2x`): 2 pts até 20% no ativo, 1 pt se 20–40%.
+  - Theta: 1 pt se `Theta baixo`.
+  - `score_total` varia de 0 a 7 para ordenar rapidamente os melhores trades dentro do checklist.
 
 
 

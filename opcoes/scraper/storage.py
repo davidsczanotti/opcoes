@@ -41,6 +41,11 @@ CSV_FIELDS: List[str] = [
     "Status_2x",
     "Status_Liquidez",
     "Status_Theta",
+    "moneyness_score",
+    "liquidez_score",
+    "dobro_score",
+    "theta_score",
+    "score_total",
 ]
 
 

@@ -340,12 +340,25 @@ async def _wait_idle(page: Page) -> None:
 
 
 def _apply_status_indicators(row: Dict[str, str]) -> None:
-    row["Status_Moneyness"] = _status_moneyness(row)
+    status_m = _status_moneyness(row)
+    row["Status_Moneyness"] = status_m
     pct_alta, status_2x = _double_scenario(row)
     row["%_Alta_p_2x"] = _format_decimal(pct_alta, decimals=1, signed=False)
     row["Status_2x"] = status_2x
-    row["Status_Liquidez"] = _status_liquidez(row)
-    row["Status_Theta"] = _status_theta(row)
+    status_liq = _status_liquidez(row)
+    row["Status_Liquidez"] = status_liq
+    status_theta = _status_theta(row)
+    row["Status_Theta"] = status_theta
+
+    m_score = _score_moneyness(status_m)
+    l_score = _score_liquidez(status_liq)
+    d_score = _score_dobro(status_2x)
+    t_score = _score_theta(status_theta)
+    row["moneyness_score"] = str(m_score)
+    row["liquidez_score"] = str(l_score)
+    row["dobro_score"] = str(d_score)
+    row["theta_score"] = str(t_score)
+    row["score_total"] = str(m_score + l_score + d_score + t_score)
 
 
 def _parse_float(value: Optional[str]) -> Optional[float]:
@@ -461,6 +474,34 @@ def _format_decimal(value: Optional[float], *, decimals: int = 2, signed: bool =
         return ""
     fmt = f"{value:+.{decimals}f}" if signed else f"{value:.{decimals}f}"
     return fmt.replace(".", ",")
+
+
+def _score_moneyness(label: str) -> int:
+    if label == "0-5% OTM (colada)":
+        return 2
+    if label == "5-15% OTM (aposta)":
+        return 1
+    return 0
+
+
+def _score_liquidez(label: str) -> int:
+    if label == "Alta":
+        return 2
+    if label == "Média":
+        return 1
+    return 0
+
+
+def _score_dobro(label: str) -> int:
+    if label == "Dobra com até 20% no ativo":
+        return 2
+    if label == "Dobra com 20-40% no ativo":
+        return 1
+    return 0
+
+
+def _score_theta(label: str) -> int:
+    return 1 if label == "Theta baixo" else 0
 
 
 __all__ = ["scrape_all"]
