@@ -40,6 +40,8 @@ CSV_FIELDS: List[str] = [
     "trend_flag",
     "trend_reason",
     "custo_pct",
+    "intrinsic_value",
+    "extrinsic_value",
     # Indicadores opcionais (preenchidos se arquivo de fundamentos for fornecido)
     "earnings_yield_ttm",
     "pe_ttm",

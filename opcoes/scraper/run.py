@@ -155,9 +155,14 @@ async def scrape_all(
                     r["trend_reason"] = price_info.trend_reason
                     cost_pct = _cost_pct(row=r, spot_price=price_info.price)
                     r["custo_pct"] = _format_decimal(cost_pct, decimals=2, signed=False) if cost_pct is not None else ""
+                    intrinsic, extrinsic = _intrinsic_extrinsic(row=r, spot_price=price_info.price)
+                    r["intrinsic_value"] = _format_decimal(intrinsic, decimals=2, signed=False) if intrinsic is not None else ""
+                    r["extrinsic_value"] = _format_decimal(extrinsic, decimals=2, signed=False) if extrinsic is not None else ""
             else:
                 for r in rows:
                     r["custo_pct"] = ""
+                    r["intrinsic_value"] = ""
+                    r["extrinsic_value"] = ""
 
             iv_summary = _summarize_iv(rows)
             iv_ranks: Dict[Tuple[str, str], Optional[float]] = {}
@@ -705,6 +710,18 @@ def _cost_pct(row: Dict[str, str], spot_price: Optional[float]) -> Optional[floa
     if option_price is None:
         return None
     return (option_price / spot_price) * 100.0
+
+
+def _intrinsic_extrinsic(row: Dict[str, str], spot_price: Optional[float]) -> Tuple[Optional[float], Optional[float]]:
+    if spot_price is None or spot_price <= 0:
+        return None, None
+    strike = _parse_float(row.get("strike"))
+    option_price = _parse_float(row.get("ultimo"))
+    if strike is None or option_price is None:
+        return None, None
+    intrinsic = max(spot_price - strike, 0.0)
+    extrinsic = max(option_price - intrinsic, 0.0)
+    return intrinsic, extrinsic
 
 
 def _infer_snapshot_date(rows: Sequence[Dict[str, str]]) -> Optional[str]:
