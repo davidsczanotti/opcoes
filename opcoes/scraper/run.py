@@ -33,6 +33,7 @@ from .statusinvest import fetch_fundamentals_map
 from .prices import PriceIndicators, fetch_price_indicators
 from .ivrank import IVRankStore
 from .activity import FlowStore
+from .snapshots import SnapshotDB
 
 
 MAX_VENCIMENTOS = 8
@@ -110,6 +111,13 @@ async def scrape_all(
         except Exception as exc:  # noqa: BLE001
             print(f"Aviso: falhou histórico de fluxo: {exc}")
             flow_store = None
+        snapshot_db: Optional[SnapshotDB] = None
+        try:
+            snapshot_db = SnapshotDB(Path("data/opcoes_snapshots.db"))
+        except Exception as exc:  # noqa: BLE001
+            print(f"Aviso: falhou snapshots DB: {exc}")
+            snapshot_db = None
+        snapshot_rows: List[Dict[str, str]] = []
 
         for idx, symbol in enumerate(target_symbols, start=1):
             print(f"[{idx}/{total_symbols}] Processando {symbol}…")
@@ -210,6 +218,7 @@ async def scrape_all(
                     r["iv_score"] = ""
                     r["score_total"] = str(base_total)
 
+            snapshot_rows.extend(rows)
             written = append_rows_dedup(output_csv, rows, existing_tickers)
             total_written += written
             print(f"  -> {len(rows)} linhas coletadas (novas: {written}).")
@@ -219,6 +228,10 @@ async def scrape_all(
             iv_store.close()
         if flow_store:
             flow_store.close()
+        if snapshot_db:
+            snapshot_db.record_underlyings(snapshot_date, price_map, target_symbols)
+            snapshot_db.record_options(snapshot_date, snapshot_rows)
+            snapshot_db.close()
         print(f"Concluído. Novos registros gravados: {total_written}. Arquivo: {output_csv}")
 
 
@@ -691,5 +704,4 @@ def _cost_pct(row: Dict[str, str], spot_price: Optional[float]) -> Optional[floa
     return (option_price / spot_price) * 100.0
 
 
-__all__ = ["scrape_all"]
 __all__ = ["scrape_all"]

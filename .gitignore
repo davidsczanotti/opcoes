@@ -13,6 +13,7 @@ __pycache__/
 data/opcoes_calls_eu.csv
 data/iv_history.db
 data/flow_history.db
+data/
 
 # Secrets or config overrides
 .env
