@@ -89,7 +89,8 @@ class SnapshotDB:
         rows = list(rows)
         if not rows:
             return
-        columns = ["snapshot_date"] + CSV_FIELDS
+        columns = ["snapshot_date"] + list(CSV_FIELDS)
+        column_clause = ",".join(f'"{col}"' for col in columns)
         placeholders = ",".join(["?"] * len(columns))
         payload: List[List[str]] = []
         for row in rows:
@@ -99,7 +100,7 @@ class SnapshotDB:
             payload.append(values)
         self.conn.executemany(
             f"""
-            INSERT OR REPLACE INTO option_snapshots ({','.join(columns)})
+            INSERT OR REPLACE INTO option_snapshots ({column_clause})
             VALUES ({placeholders})
             """,
             payload,

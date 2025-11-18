@@ -228,6 +228,9 @@ async def scrape_all(
             iv_store.close()
         if flow_store:
             flow_store.close()
+        detected_snapshot_date = _infer_snapshot_date(snapshot_rows)
+        if detected_snapshot_date:
+            snapshot_date = detected_snapshot_date
         if snapshot_db:
             snapshot_db.record_underlyings(snapshot_date, price_map, target_symbols)
             snapshot_db.record_options(snapshot_date, snapshot_rows)
@@ -702,6 +705,24 @@ def _cost_pct(row: Dict[str, str], spot_price: Optional[float]) -> Optional[floa
     if option_price is None:
         return None
     return (option_price / spot_price) * 100.0
+
+
+def _infer_snapshot_date(rows: Sequence[Dict[str, str]]) -> Optional[str]:
+    dates: List[dt.date] = []
+    for row in rows:
+        raw = (row.get("data_hora") or "").strip()
+        if len(raw) != 10 or "/" not in raw:
+            continue
+        day, month, year = raw.split("/")
+        try:
+            parsed = dt.date(int(year), int(month), int(day))
+        except ValueError:
+            continue
+        dates.append(parsed)
+    if not dates:
+        return None
+    latest = max(dates)
+    return latest.isoformat()
 
 
 __all__ = ["scrape_all"]
