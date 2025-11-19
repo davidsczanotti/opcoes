@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import math
+import re
 import statistics
 import datetime as dt
 from pathlib import Path
@@ -136,6 +137,8 @@ async def scrape_all(
                 print("  -> sem resultados.")
                 continue
 
+            site_price, site_price_date = await _extract_site_price(page)
+
             # Anota indicadores por papel subjacente se disponíveis
             if fundamentals_map:
                 ey, pe = fundamentals_map.get(symbol, (None, None))
@@ -145,6 +148,21 @@ async def scrape_all(
                     r["earnings_yield_ttm"] = ey_str
                     r["pe_ttm"] = pe_str
             price_info = price_map.get(symbol)
+            if price_info:
+                if site_price is not None:
+                    price_info.price = site_price
+                if site_price_date:
+                    price_info.price_date = site_price_date
+            elif site_price is not None or site_price_date:
+                price_info = PriceIndicators(
+                    price=site_price,
+                    price_date=site_price_date,
+                    mm200=None,
+                    return_3m=None,
+                    trend_flag=None,
+                    trend_reason="",
+                )
+                price_map[symbol] = price_info
             if price_info:
                 for r in rows:
                     r["underlying_price"] = _format_decimal(price_info.price, decimals=2, signed=False)
@@ -502,7 +520,13 @@ def _parse_float(value: Optional[str]) -> Optional[float]:
     )
     if not cleaned:
         return None
-    cleaned = cleaned.replace(".", "").replace(",", ".").replace(" ", "")
+    cleaned = (
+        cleaned.replace('"', "")
+        .replace("'", "")
+        .replace(".", "")
+        .replace(",", ".")
+        .replace(" ", "")
+    )
     if not cleaned or cleaned == "-":
         return None
     try:
@@ -740,6 +764,47 @@ def _infer_snapshot_date(rows: Sequence[Dict[str, str]]) -> Optional[str]:
         return None
     latest = max(dates)
     return latest.isoformat()
+
+
+async def _extract_site_price(page: Page) -> Tuple[Optional[float], Optional[str]]:
+    price = None
+    date_str = None
+    price_locator = page.locator("#divCotacaoAtual span[data-mkt-prop='p']")
+    if await price_locator.count():
+        with contextlib.suppress(Exception):
+            text = (await price_locator.inner_text()).strip()
+            price = _parse_site_currency(text)
+    date_locator = page.locator("#divCotacaoAtual span[data-mkt-prop='h']")
+    if await date_locator.count():
+        with contextlib.suppress(Exception):
+            raw = (await date_locator.inner_text()).strip()
+            date_str = _parse_site_date(raw)
+    return price, date_str
+
+
+def _parse_site_currency(text: str) -> Optional[float]:
+    if not text:
+        return None
+    cleaned = text.replace("R$", "").replace(" ", "").replace(".", "").replace(",", ".")
+    if not cleaned:
+        return None
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
+def _parse_site_date(text: str) -> Optional[str]:
+    text = text.strip()
+    match = re.fullmatch(r"(\d{2})/(\d{2})/(\d{4})", text)
+    if not match:
+        return None
+    day, month, year = match.groups()
+    try:
+        parsed = dt.date(int(year), int(month), int(day))
+    except ValueError:
+        return None
+    return parsed.isoformat()
 
 
 __all__ = ["scrape_all"]

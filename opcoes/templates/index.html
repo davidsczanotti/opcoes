@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <title>Opções – Ranking diário</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    >
+  </head>
+  <body class="bg-light">
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
+      <div class="container-fluid">
+        <a class="navbar-brand" href="/">Opções</a>
+        <div class="navbar-nav">
+          <a class="nav-link active" href="/">Ranking</a>
+          <a class="nav-link" href="/positions">Posições</a>
+        </div>
+      </div>
+    </nav>
+
+    <div class="container">
+      <h1 class="h4 mb-3">Ranking diário</h1>
+      <p class="text-muted">Snapshot: {{ data.snapshot_date }}</p>
+
+      <h2 class="h5 mt-4">Top oportunidades</h2>
+      {% if not data.opportunities %}
+        <p>Nenhuma opção dentro do filtro de score.</p>
+      {% else %}
+        <div class="table-responsive">
+          <table class="table table-sm table-striped align-middle">
+            <thead class="table-light">
+              <tr>
+                <th>Ticker</th>
+                <th>Ativo</th>
+                <th class="text-end">Score</th>
+                <th class="text-end">Último</th>
+                <th class="text-end">% p/ 2x</th>
+                <th class="text-end">Custo %</th>
+                <th class="text-end">IV</th>
+                <th class="text-end">EM2x</th>
+                <th class="text-end">Fluxo 5d</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for opp in data.opportunities %}
+                <tr>
+                  <td>{{ opp.ticker }}</td>
+                  <td>{{ opp.underlying }}</td>
+                  <td class="text-end">{{ opp.score_total or '-' }}</td>
+                  <td class="text-end">
+                    {% if opp.ultimo is not none %}{{ "%.2f"|format(opp.ultimo) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if opp["%_Alta_p_2x"] is not none %}{{ "%.2f"|format(opp["%_Alta_p_2x"]) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if opp.custo_pct is not none %}{{ "%.2f"|format(opp.custo_pct) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">{{ opp.iv_score if opp.iv_score is not none else '-' }}</td>
+                  <td class="text-end">{{ opp.em2x_score if opp.em2x_score is not none else '-' }}</td>
+                  <td class="text-end">
+                    {% if opp.vol_fluxo_5d is not none %}{{ "%.2f"|format(opp.vol_fluxo_5d) }}{% else %}-{% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+
+      <h2 class="h5 mt-4">Posições abertas</h2>
+      {% if not data.positions %}
+        <p>Nenhuma posição aberta.</p>
+      {% else %}
+        <div class="table-responsive">
+          <table class="table table-sm table-striped align-middle">
+            <thead class="table-light">
+              <tr>
+                <th>ID</th>
+                <th>Ticker</th>
+                <th>Data</th>
+                <th class="text-end">Qtd</th>
+                <th class="text-end">Preço</th>
+                <th class="text-end">Último</th>
+                <th class="text-end">P/L</th>
+                <th class="text-end">P/L%</th>
+                <th class="text-end">Score</th>
+                <th>Trend</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for pos in data.positions %}
+                <tr>
+                  <td>{{ pos.id }}</td>
+                  <td>{{ pos.ticker }}</td>
+                  <td>{{ pos.trade_date }}</td>
+                  <td class="text-end">{{ pos.qty }}</td>
+                  <td class="text-end">{{ "%.2f"|format(pos.entry_price) }}</td>
+                  <td class="text-end">
+                    {% if pos.last_price is not none %}{{ "%.2f"|format(pos.last_price) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if pos.pl is not none %}{{ "%.2f"|format(pos.pl) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if pos.pl_pct is not none %}{{ "%.2f"|format(pos.pl_pct) }}%{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">{{ pos.score_total or '-' }}</td>
+                  <td>{{ pos.trend_flag or '-' }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+    </div>
+  </body>
+</html>
+

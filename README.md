@@ -62,6 +62,9 @@ Notas
 - A planilha também traz `em_1sigma_pct`, `relacao_em_2x` e `em2x_score`, comparando o movimento implícito (1σ até o vencimento) com o movimento que você precisa para dobrar a opção. Use `relacao_em_2x >= 1` ou `em2x_score >= 1` para focar nas estruturas com cenário de 2x compatível com o que a curva de vol já precifica.
 - Indicadores adicionais: `custo_pct` (custo da call sobre o ativo), `intrinsic_value`/`extrinsic_value` (quanto do prêmio é intrínseco vs. tempo/vol), `vol_fluxo_5d` e `num_fluxo_5d` (ratio vs. média móvel 5 dias de volume financeiro e negócios, usando `data/flow_history.db`). Eles ajudam a avaliar payoff vs. spot e detectar fluxo anômalo.
 - Cada execução também persiste snapshots diários em `data/opcoes_snapshots.db`, permitindo comparar rankings dia a dia e alimentar um front-end futuramente.
+- Use `poetry run python -m opcoes.cli position add ...` para registrar compras, `... position list` para acompanhar P/L atual (os valores usam o último snapshot da opção) e `... position close --id X --exit-date ... --price ...` para encerrar posições. O mesmo `opcoes_snapshots.db` guarda os trades em uma tabela `positions`.
+- Após cada coleta, rode `poetry run python -m opcoes.cli report` para ver um resumo do snapshot mais recente (top oportunidades filtradas por score/trend) e o status das posições abertas com alertas automáticos.
+ - Para trabalhar no Excel sempre com dados atualizados do último snapshot (e não com o `opcoes_calls_eu.csv` congelado), use `poetry run python -m opcoes.cli snapshot export --output data/opcoes_latest.csv`. Opcionalmente, informe `--date YYYY-MM-DD` para exportar um dia específico.
 - Para priorização rápida, o CSV calcula `moneyness_score`, `liquidez_score`, `dobro_score`, `theta_score`, `iv_score` e `score_total` (soma). As regras são:
   - Moneyness: 2 pts se está em `0-5% OTM (colada)`, 1 pt se `5-15% OTM (aposta)`.
   - Liquidez: 2 pts para Status_Liquidez = Alta, 1 pt para Média.
@@ -70,5 +73,3 @@ Notas
   - IV Rank: 2 pts se `iv_rank_180d` está entre 10–60, 1 pt se 0–10 ou 60–80.
   - Movimento implícito x 2x: 2 pts se `relacao_em_2x >= 1`, 1 pt se entre 0,5 e 1.
   - `score_total` varia de 0 a 11 para ordenar rapidamente os melhores trades dentro do checklist completo.
-
-

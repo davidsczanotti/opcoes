@@ -33,6 +33,7 @@ class SnapshotDB:
             )
             """
         )
+        self._ensure_columns("option_snapshots", CSV_FIELDS)
         self.conn.execute(
             """
             CREATE TABLE IF NOT EXISTS underlying_snapshots (
@@ -48,6 +49,17 @@ class SnapshotDB:
             )
             """
         )
+        self.conn.commit()
+
+    def _ensure_columns(self, table: str, columns: Iterable[str]) -> None:
+        existing = {
+            row[1]
+            for row in self.conn.execute(f'PRAGMA table_info("{table}")').fetchall()
+            if row and len(row) > 1
+        }
+        for col in columns:
+            if col not in existing:
+                self.conn.execute(f'ALTER TABLE "{table}" ADD COLUMN "{col}" TEXT')
         self.conn.commit()
 
     def record_underlyings(
