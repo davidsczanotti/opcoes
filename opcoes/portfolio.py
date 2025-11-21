@@ -29,6 +29,8 @@ def _ensure_tables(conn: sqlite3.Connection) -> None:
             qty INTEGER NOT NULL,
             entry_price REAL NOT NULL,
             fees REAL DEFAULT 0,
+            trade_type TEXT DEFAULT 'swing',
+            irrf REAL,
             status TEXT NOT NULL DEFAULT 'open',
             exit_date TEXT,
             exit_price REAL,
@@ -56,6 +58,8 @@ def _ensure_position_columns(conn: sqlite3.Connection) -> None:
         "partial_price": "REAL",
         "partial_qty": "INTEGER",
         "exit_reason": "TEXT",
+        "trade_type": "TEXT",
+        "irrf": "REAL",
     }
     for col, col_type in columns.items():
         if col not in existing:
@@ -75,14 +79,20 @@ def add_position(
     qty: int,
     entry_price: float,
     fees: float = 0.0,
+    trade_type: str = "swing",
+    irrf: Optional[float] = None,
     notes: Optional[str] = None,
+    partial_date: Optional[str] = None,
+    partial_price: Optional[float] = None,
+    partial_qty: Optional[int] = None,
+    exit_reason: Optional[str] = None,
 ) -> int:
     conn = _connect()
     cursor = conn.cursor()
     cursor.execute(
         """
-        INSERT INTO positions (ticker, underlying, trade_date, qty, entry_price, fees, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO positions (ticker, underlying, trade_date, qty, entry_price, fees, trade_type, irrf, notes, partial_date, partial_price, partial_qty, exit_reason)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             _normalize_ticker(ticker),
@@ -91,7 +101,13 @@ def add_position(
             int(qty),
             float(entry_price),
             float(fees or 0.0),
+            trade_type,
+            float(irrf) if irrf is not None else None,
             notes,
+            partial_date,
+            float(partial_price) if partial_price is not None else None,
+            int(partial_qty) if partial_qty is not None else None,
+            exit_reason,
         ),
     )
     conn.commit()
@@ -135,6 +151,8 @@ def update_position(
     partial_price: Optional[float] = None,
     partial_qty: Optional[int] = None,
     exit_reason: Optional[str] = None,
+    trade_type: Optional[str] = None,
+    irrf: Optional[float] = None,
 ) -> None:
     fields = []
     params = []
@@ -174,6 +192,12 @@ def update_position(
     if exit_reason is not None:
         fields.append("exit_reason = ?")
         params.append(exit_reason)
+    if trade_type is not None:
+        fields.append("trade_type = ?")
+        params.append(trade_type)
+    if irrf is not None:
+        fields.append("irrf = ?")
+        params.append(float(irrf))
     if not fields:
         return
 
@@ -290,6 +314,14 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
         invested = entry_price * qty
         pl_pct = (pl / invested) * 100.0
 
+    breakeven = None
+    if open_qty > 0:
+        # preço tal que PL total (realizado + aberto - fees) = 0
+        be_price = entry_price
+        numerator = (realized_pl or 0.0) - fees
+        be_price = entry_price - (numerator / open_qty)
+        breakeven = be_price
+
     return {
         "id": row["id"],
         "ticker": row["ticker"],
@@ -314,6 +346,9 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
         "partial_date": partial_date,
         "exit_reason": exit_reason,
         "realized_pl": realized_pl,
+        "breakeven_price": breakeven,
+        "trade_type": row["trade_type"],
+        "irrf": row["irrf"],
     }
 
 

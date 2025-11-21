@@ -9,6 +9,7 @@ from .enrich import enrich_csv
 from .portfolio import add_position, list_positions, close_position
 from .report import generate_report
 from .snapshot_export import export_snapshot
+from .tax import compute_tax
 
 
 def parse_args() -> argparse.Namespace:
@@ -181,6 +182,10 @@ def parse_args() -> argparse.Namespace:
         help="Arquivo CSV de saída (default: data/opcoes_latest.csv)",
     )
 
+    tc = sub.add_parser("tax", help="Relatório fiscal (DARF)")
+    tc.add_argument("--year", type=int, required=True, help="Ano (YYYY)")
+    tc.add_argument("--month", type=int, required=True, help="Mês (1-12)")
+
     return parser.parse_args()
 
 
@@ -280,6 +285,14 @@ def main() -> None:
             except RuntimeError as exc:
                 raise SystemExit(str(exc)) from exc
             print(f"Snapshot exportado para: {out}")
+    elif args.cmd == "tax":
+        summary = compute_tax(month=args.month, year=args.year)
+        print(f"Relatório fiscal {summary.month:02d}/{summary.year}")
+        print(f"  Swing trade: lucro líquido R$ {summary.swing_net:.2f}, IR devido R$ {summary.swing_ir:.2f}, IRRF R$ {summary.swing_irrf:.2f}")
+        print(f"  Day trade:   lucro líquido R$ {summary.daytrade_net:.2f}, IR devido R$ {summary.daytrade_ir:.2f}, IRRF R$ {summary.daytrade_irrf:.2f}")
+        total_ir = summary.swing_ir + summary.daytrade_ir
+        total_irrf = summary.swing_irrf + summary.daytrade_irrf
+        print(f"  Total IR devido: R$ {total_ir:.2f} (IRRF a compensar: R$ {total_irrf:.2f})")
     else:
         raise SystemExit(f"Comando desconhecido: {args.cmd}")
 

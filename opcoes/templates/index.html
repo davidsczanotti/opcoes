@@ -96,6 +96,43 @@
       {% if not data.positions %}
         <p>Nenhuma posição aberta.</p>
       {% else %}
+        <div class="row mb-3">
+          <div class="col-md-3">
+            <div class="card">
+              <div class="card-body">
+                <div class="text-muted small">Valor de compra</div>
+                <div class="fs-5">R$ {{ "%.2f"|format(totals.total_purchase) }}</div>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="card">
+              <div class="card-body">
+                <div class="text-muted small">Valor atual (aberto + realizado)</div>
+                <div class="fs-5">R$ {{ "%.2f"|format(totals.total_current) }}</div>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="card">
+              <div class="card-body">
+                <div class="text-muted small">P/L total</div>
+                <div class="fs-5">R$ {{ "%.2f"|format(totals.total_pl) }}</div>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="card">
+              <div class="card-body">
+                <div class="text-muted small">P/L%</div>
+                <div class="fs-5">
+                  {% if totals.total_pl_pct is not none %}{{ "%.2f"|format(totals.total_pl_pct) }}%{% else %}-{% endif %}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div class="table-responsive">
           <table class="table table-sm table-striped align-middle">
             <thead class="table-light">
@@ -108,6 +145,7 @@
                 <th class="text-end">Último</th>
                 <th class="text-end">P/L</th>
                 <th class="text-end">P/L%</th>
+                <th class="text-end">Breakeven</th>
                 <th class="text-end">Score</th>
                 <th>Trend</th>
               </tr>
@@ -130,8 +168,14 @@
                   <td class="text-end">
                     {% if pos.pl_pct is not none %}{{ "%.2f"|format(pos.pl_pct) }}%{% else %}-{% endif %}
                 </td>
-                <td class="text-end">{{ pos.score_total or '-' }}</td>
-                <td>{{ pos.trend_flag or '-' }}</td>
+                  <td class="text-end">
+                    {% if pos.pl_pct is not none %}{{ "%.2f"|format(pos.pl_pct) }}%{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if pos.breakeven_price is not none %}{{ "%.2f"|format(pos.breakeven_price) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">{{ pos.score_total or '-' }}</td>
+                  <td>{{ pos.trend_flag or '-' }}</td>
                 <td>
                   {% if has_alert %}
                     {% for r in has_alert %}
