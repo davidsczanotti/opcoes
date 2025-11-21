@@ -24,6 +24,24 @@
       <h1 class="h4 mb-3">Ranking diário</h1>
       <p class="text-muted">Snapshot: {{ data.snapshot_date }}</p>
 
+      <form class="row g-2 mb-3" method="get" action="/">
+        <div class="col-sm-2">
+          <label class="form-label">Score mínimo</label>
+          <input type="number" name="min_score" class="form-control form-control-sm" value="{{ min_score }}">
+        </div>
+        <div class="col-sm-2">
+          <label class="form-label">Limite</label>
+          <input type="number" name="limit" class="form-control form-control-sm" value="{{ limit }}">
+        </div>
+        <div class="col-sm-3">
+          <label class="form-label">Filtro de ativo/ticker (contém)</label>
+          <input name="underlying" class="form-control form-control-sm" value="{{ underlying_filter }}">
+        </div>
+        <div class="col-sm-2 align-self-end">
+          <button class="btn btn-primary btn-sm" type="submit">Aplicar</button>
+        </div>
+      </form>
+
       <h2 class="h5 mt-4">Top oportunidades</h2>
       {% if not data.opportunities %}
         <p>Nenhuma opção dentro do filtro de score.</p>
@@ -38,6 +56,8 @@
                 <th class="text-end">Último</th>
                 <th class="text-end">% p/ 2x</th>
                 <th class="text-end">Custo %</th>
+                <th>Data Spot</th>
+                <th class="text-end">D. Úteis</th>
                 <th class="text-end">IV</th>
                 <th class="text-end">EM2x</th>
                 <th class="text-end">Fluxo 5d</th>
@@ -58,6 +78,8 @@
                   <td class="text-end">
                     {% if opp.custo_pct is not none %}{{ "%.2f"|format(opp.custo_pct) }}{% else %}-{% endif %}
                   </td>
+                  <td>{{ opp.underlying_price_date or '-' }}</td>
+                  <td class="text-end">{{ opp.dias_uteis or '-' }}</td>
                   <td class="text-end">{{ opp.iv_score if opp.iv_score is not none else '-' }}</td>
                   <td class="text-end">{{ opp.em2x_score if opp.em2x_score is not none else '-' }}</td>
                   <td class="text-end">
@@ -92,12 +114,13 @@
             </thead>
             <tbody>
               {% for pos in data.positions %}
-                <tr>
-                  <td>{{ pos.id }}</td>
-                  <td>{{ pos.ticker }}</td>
-                  <td>{{ pos.trade_date }}</td>
-                  <td class="text-end">{{ pos.qty }}</td>
-                  <td class="text-end">{{ "%.2f"|format(pos.entry_price) }}</td>
+              {% set has_alert = alerts_map.get(pos.id) %}
+              <tr class="{% if has_alert %}table-warning{% endif %}">
+                <td>{{ pos.id }}</td>
+                <td>{{ pos.ticker }}</td>
+                <td>{{ pos.trade_date }}</td>
+                <td class="text-end">{{ pos.qty }}</td>
+                <td class="text-end">{{ "%.2f"|format(pos.entry_price) }}</td>
                   <td class="text-end">
                     {% if pos.last_price is not none %}{{ "%.2f"|format(pos.last_price) }}{% else %}-{% endif %}
                   </td>
@@ -106,16 +129,22 @@
                   </td>
                   <td class="text-end">
                     {% if pos.pl_pct is not none %}{{ "%.2f"|format(pos.pl_pct) }}%{% else %}-{% endif %}
-                  </td>
-                  <td class="text-end">{{ pos.score_total or '-' }}</td>
-                  <td>{{ pos.trend_flag or '-' }}</td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
+                </td>
+                <td class="text-end">{{ pos.score_total or '-' }}</td>
+                <td>{{ pos.trend_flag or '-' }}</td>
+                <td>
+                  {% if has_alert %}
+                    {% for r in has_alert %}
+                      <div class="small text-danger">{{ r }}</div>
+                    {% endfor %}
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
       {% endif %}
     </div>
   </body>
 </html>
-
