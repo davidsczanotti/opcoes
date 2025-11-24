@@ -18,6 +18,7 @@ DB_PATH = Path("data/opcoes_snapshots.db")
 class ReportData:
     snapshot_date: str
     opportunities: List[Dict[str, object]]
+    theoretical_opportunities: List[Dict[str, object]]
     positions: List[Dict[str, object]]
     alerts: List[Dict[str, object]]
     recurring_opportunities: List[Dict[str, object]]
@@ -51,16 +52,31 @@ def generate_report(
             opp["iv_hv_spread"] = iv - hv
         else:
             opp["iv_hv_spread"] = None
+        ask = opp.get("best_ask")
+        theo = opp.get("preco_teorico")
+        if ask is not None and theo is not None and theo > 0:
+            opp["desconto_teorico_pct"] = (theo - ask) / theo * 100.0
+        else:
+            opp["desconto_teorico_pct"] = None
     recurring_opps, window_start, snapshot_days = _fetch_recurring_opportunities(
         conn, snapshot_date, min_score, recurring_days, recurring_limit
     )
     conn.close()
 
+    tradeable_opps: List[Dict[str, object]] = []
+    theoretical_opps: List[Dict[str, object]] = []
+    for opp in opportunities:
+        if opp.get("best_ask") is not None:
+            tradeable_opps.append(opp)
+        elif opp.get("preco_teorico") is not None:
+            theoretical_opps.append(opp)
+
     positions = list_positions(include_closed=False)
     alerts = _build_alerts(positions, min_score=min_score)
     return ReportData(
         snapshot_date=snapshot_date,
-        opportunities=opportunities,
+        opportunities=tradeable_opps,
+        theoretical_opportunities=theoretical_opps,
         positions=positions,
         alerts=alerts,
         recurring_opportunities=recurring_opps,
@@ -103,20 +119,36 @@ def _fetch_opportunities(
             "Status_2x",
             "iv_score",
             "em2x_score",
+            "delta",
             "ultimo",
             "underlying_price",
             "%_Alta_p_2x",
             "custo_pct",
             "intrinsic_value",
             "extrinsic_value",
+            "extrinsic_pct_spot",
+            "breakeven_price",
+            "breakeven_dist_pct",
             "vol_fluxo_5d",
             "num_fluxo_5d",
             "iv_rank_180d",
-            "vol_impl_perc"
+            "vol_impl_perc",
+            "best_bid",
+            "best_ask",
+            "spread_pct",
+            "preco_teorico",
+            "distorcao_preco_pct",
+            "distorcao_flag",
+            "illiquidez_flag"
         FROM option_snapshots
         WHERE snapshot_date = ?
           AND CAST("score_total" AS INTEGER) >= ?
           AND ("trend_flag" = '1' OR "trend_flag" = '')
+          AND (
+                "distorcao_flag" IS NULL
+             OR "distorcao_flag" = ''
+             OR ABS(CAST("distorcao_preco_pct" AS REAL)) <= 50.0
+          )
         ORDER BY CAST("score_total" AS INTEGER) DESC,
                  CAST("%_Alta_p_2x" AS REAL) ASC NULLS LAST
         LIMIT ?
@@ -138,16 +170,27 @@ def _row_to_dict(row: sqlite3.Row) -> Dict[str, object]:
         "Status_2x": row["Status_2x"],
         "iv_score": _parse_int(row["iv_score"]),
         "em2x_score": _parse_int(row["em2x_score"]),
+        "delta": _parse_decimal(row["delta"]),
         "ultimo": _parse_decimal(row["ultimo"]),
         "underlying_price": _parse_decimal(row["underlying_price"]),
         "%_Alta_p_2x": _parse_decimal(row["%_Alta_p_2x"]),
         "custo_pct": _parse_decimal(row["custo_pct"]),
         "intrinsic_value": _parse_decimal(row["intrinsic_value"]),
         "extrinsic_value": _parse_decimal(row["extrinsic_value"]),
+        "extrinsic_pct_spot": _parse_decimal(row["extrinsic_pct_spot"]),
+        "breakeven_price": _parse_decimal(row["breakeven_price"]),
+        "breakeven_dist_pct": _parse_decimal(row["breakeven_dist_pct"]),
         "vol_fluxo_5d": _parse_decimal(row["vol_fluxo_5d"]),
         "num_fluxo_5d": _parse_decimal(row["num_fluxo_5d"]),
         "iv_rank_180d": _parse_decimal(row["iv_rank_180d"]),
         "vol_impl_perc": _parse_decimal(row["vol_impl_perc"]),
+        "best_bid": _parse_decimal(row["best_bid"]),
+        "best_ask": _parse_decimal(row["best_ask"]),
+        "spread_pct": _parse_decimal(row["spread_pct"]),
+        "preco_teorico": _parse_decimal(row["preco_teorico"]),
+        "distorcao_preco_pct": _parse_decimal(row["distorcao_preco_pct"]),
+        "distorcao_flag": (row["distorcao_flag"] or "").strip(),
+        "illiquidez_flag": (row["illiquidez_flag"] or "").strip(),
     }
 
 
@@ -303,7 +346,9 @@ def _compute_hv_map(
 
     hv_map: Dict[str, Optional[float]] = {}
     for sym, price_by_date in grouped.items():
-        if len(price_by_date) < 2:
+        # Evita HV irreal quando há poucos pontos: exige mínimo de observações
+        min_obs = max(5, window_days // 2)  # precisa de ao menos ~metade da janela, mínimo 5
+        if len(price_by_date) < min_obs:
             hv_map[sym] = None
             continue
         sorted_prices = [price_by_date[d] for d in sorted(price_by_date)]

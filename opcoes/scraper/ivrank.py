@@ -75,12 +75,14 @@ class IVRankStore:
             (underlying, vencimento, start_date, snapshot_date),
         )
         values = [row[0] for row in cur.fetchall() if row and row[0] is not None]
-        if not values:
+        # Precisa de histórico mínimo para um rank confiável
+        if not values or len(values) < 5:
             return None
         min_val = min(values)
         max_val = max(values)
+        # Se só tem valores iguais, não dá para rankear
         if max_val - min_val < 1e-6:
-            return 50.0
+            return None
         rank = ((current_value - min_val) / (max_val - min_val)) * 100.0
         return max(0.0, min(100.0, rank))
 

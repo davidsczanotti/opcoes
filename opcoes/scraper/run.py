@@ -35,6 +35,7 @@ from .prices import PriceIndicators, fetch_price_indicators
 from .ivrank import IVRankStore
 from .activity import FlowStore
 from .snapshots import SnapshotDB
+from .far_expirations import fetch_far_expiration_quotes
 
 
 MAX_VENCIMENTOS = 8
@@ -60,6 +61,8 @@ async def scrape_all(
         launch_kwargs = {"headless": headless}
         if proxy_settings:
             launch_kwargs["proxy"] = proxy_settings
+        # WSL/containers costumam ter /dev/shm pequeno; evita crash prematuro do Chromium.
+        launch_kwargs["args"] = launch_kwargs.get("args", []) + ["--disable-dev-shm-usage"]
         browser = await p.chromium.launch(**launch_kwargs)
         context = await browser.new_context()
         page = await context.new_page()
@@ -119,15 +122,31 @@ async def scrape_all(
             print(f"Aviso: falhou snapshots DB: {exc}")
             snapshot_db = None
         snapshot_rows: List[Dict[str, str]] = []
+        far_quotes: Dict[str, dict] = {}
+        try:
+            far_quotes = fetch_far_expiration_quotes()
+            if far_quotes:
+                print(f"Livro vencimentos longos carregado ({len(far_quotes)} tickers).")
+        except Exception as exc:  # noqa: BLE001
+            print(f"Aviso: não foi possível carregar book de vencimentos longos: {exc}")
 
         for idx, symbol in enumerate(target_symbols, start=1):
             print(f"[{idx}/{total_symbols}] Processando {symbol}…")
+            if page.is_closed():
+                page = await context.new_page()
+                await page.goto(
+                    BASE_URL,
+                    wait_until="domcontentloaded",
+                    timeout=max(goto_timeout_ms, 1000),
+                )
+                await _wait_idle(page)
             try:
                 rows = await _scrape_symbol(
                     page,
                     symbol,
                     throttle_sec=throttle_sec,
                     goto_timeout_ms=goto_timeout_ms,
+                    far_quotes=far_quotes,
                 )
             except Exception as exc:  # noqa: BLE001 – queremos continuar
                 print(f"  -> erro ao processar {symbol}: {exc}")
@@ -171,16 +190,40 @@ async def scrape_all(
                     r["underlying_return_3m"] = _format_decimal(price_info.return_3m, decimals=2, signed=False)
                     r["trend_flag"] = str(price_info.trend_flag) if price_info.trend_flag is not None else ""
                     r["trend_reason"] = price_info.trend_reason
+                    # Preenche preços adicionais (teórico, spread, ask)
+                    theo_price = _compute_theoretical_price(r, spot_price=price_info.price)
+                    if theo_price is not None:
+                        r["preco_teorico"] = _format_decimal(theo_price, decimals=2, signed=False)
+                    spread_pct = _compute_spread_pct(r)
+                    if spread_pct is not None:
+                        r["spread_pct"] = _format_decimal(spread_pct, decimals=2, signed=False)
+                    price_buy = _price_for_buy(r, spot_price=price_info.price)
+                    distorcao_pct = _distorcao_preco(price_buy, theo_price)
+                    if distorcao_pct is not None:
+                        r["distorcao_preco_pct"] = _format_decimal(distorcao_pct, decimals=2, signed=False)
+                        if abs(distorcao_pct) > 10.0:
+                            r["distorcao_flag"] = "1"
                     cost_pct = _cost_pct(row=r, spot_price=price_info.price)
                     r["custo_pct"] = _format_decimal(cost_pct, decimals=2, signed=False) if cost_pct is not None else ""
                     intrinsic, extrinsic = _intrinsic_extrinsic(row=r, spot_price=price_info.price)
                     r["intrinsic_value"] = _format_decimal(intrinsic, decimals=2, signed=False) if intrinsic is not None else ""
                     r["extrinsic_value"] = _format_decimal(extrinsic, decimals=2, signed=False) if extrinsic is not None else ""
+                    extrinsic_pct = _extrinsic_pct_spot(extrinsic, spot_price=price_info.price)
+                    r["extrinsic_pct_spot"] = _format_decimal(extrinsic_pct, decimals=2, signed=False) if extrinsic_pct is not None else ""
+                    be_price, be_dist = _breakeven(price_info.price, r)
+                    if be_price is not None:
+                        r["breakeven_price"] = _format_decimal(be_price, decimals=2, signed=False)
+                    if be_dist is not None:
+                        r["breakeven_dist_pct"] = _format_decimal(be_dist, decimals=2, signed=False)
+                    _apply_penalties(r)
             else:
                 for r in rows:
                     r["custo_pct"] = ""
                     r["intrinsic_value"] = ""
                     r["extrinsic_value"] = ""
+                    r["extrinsic_pct_spot"] = ""
+                    r["breakeven_price"] = ""
+                    r["breakeven_dist_pct"] = ""
 
             iv_summary = _summarize_iv(rows)
             iv_ranks: Dict[Tuple[str, str], Optional[float]] = {}
@@ -267,6 +310,7 @@ async def _scrape_symbol(
     *,
     throttle_sec: float,
     goto_timeout_ms: int,
+    far_quotes: Optional[Dict[str, dict]] = None,
 ) -> List[Dict[str, str]]:
     await page.select_option(SELECT_ID_ACAO, value=symbol)
     await _wait_table_update(page, throttle_sec)
@@ -286,7 +330,7 @@ async def _scrape_symbol(
     await _show_all_rows(page)
     await _wait_table_update(page, throttle_sec)
 
-    rows = await _collect_table_rows(page, symbol)
+    rows = await _collect_table_rows(page, symbol, far_quotes=far_quotes or {})
     rows = [row for row in rows if (row.get("mod") or "").strip().upper() == "E"]
     return rows
 
@@ -405,7 +449,7 @@ async def _show_all_rows(page: Page) -> None:
         await select.select_option(value)
 
 
-async def _collect_table_rows(page: Page, underlying: str) -> List[Dict[str, str]]:
+async def _collect_table_rows(page: Page, underlying: str, far_quotes: Dict[str, dict]) -> List[Dict[str, str]]:
     rows_locator = page.locator(TABELA_TBODY_ROWS)
     rows_count = await rows_locator.count()
     if rows_count == 0:
@@ -421,6 +465,7 @@ async def _collect_table_rows(page: Page, underlying: str) -> List[Dict[str, str
             continue
         cells = [c.strip() for c in cells]
         record = _build_row_dict(underlying, cells)
+        _merge_far_quote(record, far_quotes)
         records.append(record)
     return records
 
@@ -453,9 +498,39 @@ def _build_row_dict(underlying: str, cells: Sequence[str]) -> Dict[str, str]:
         "descoberto": cells[22],
         "titulares": cells[23],
         "lancadores": cells[24],
+        # Reservados para best bid/ask; ficarão vazios se a tabela não expor
+        "best_bid": "",
+        "best_ask": "",
+        "spread_pct": "",
+        "preco_teorico": "",
     }
     _apply_status_indicators(record)
     return record
+
+
+def _merge_far_quote(record: Dict[str, str], far_quotes: Dict[str, dict]) -> None:
+    if not far_quotes:
+        return
+    ticker = _normalize_ticker(record.get("ticker"))
+    if not ticker:
+        return
+    quote = far_quotes.get(ticker)
+    if not quote:
+        return
+    bid = quote.get("best_bid")
+    ask = quote.get("best_ask")
+    if bid is not None:
+        record["best_bid"] = _format_decimal(float(bid), decimals=2, signed=False)
+    if ask is not None:
+        record["best_ask"] = _format_decimal(float(ask), decimals=2, signed=False)
+    if not record.get("vol_impl_perc"):
+        vol = quote.get("vol_impl_ask") or quote.get("vol_impl_bid")
+        if vol is not None:
+            record["vol_impl_perc"] = _format_decimal(float(vol) * 100.0, decimals=1, signed=False)
+    if not record.get("ultimo"):
+        last = quote.get("ultimo")
+        if last is not None:
+            record["ultimo"] = _format_decimal(float(last), decimals=2, signed=False)
 
 
 async def _wait_table_update(page: Page, throttle_sec: float) -> None:
@@ -504,7 +579,17 @@ def _apply_status_indicators(row: Dict[str, str]) -> None:
     row["liquidez_score"] = str(l_score)
     row["dobro_score"] = str(d_score)
     row["theta_score"] = str(t_score)
-    row["score_total"] = str(m_score + l_score + d_score + t_score + em_score)
+    base_score = m_score + l_score + d_score + t_score + em_score
+
+    num_neg = _parse_float(row.get("num_neg")) or 0.0
+    vol_fin = _parse_float(row.get("vol_financeiro")) or 0.0
+    illiquid = num_neg < 2 and vol_fin < 1000
+    row["illiquidez_flag"] = "1" if illiquid else ""
+    if illiquid:
+        # Penaliza fortemente liquidez pífia
+        row["score_total"] = "0"
+    else:
+        row["score_total"] = str(base_score)
 
 
 def _parse_float(value: Optional[str]) -> Optional[float]:
@@ -556,14 +641,12 @@ def _status_moneyness(row: Dict[str, str]) -> str:
 
 
 def _double_scenario(row: Dict[str, str]) -> Tuple[Optional[float], str]:
-    option_price = _parse_float(row.get("ultimo"))
+    # Usa ask quando existe; se não houver ask, tenta preço teórico
     delta = _parse_float(row.get("delta"))
     strike = _parse_float(row.get("strike"))
     dist = _parse_float(row.get("dist_perc_strike"))
     if (
-        option_price is None
-        or option_price <= 0
-        or delta is None
+        delta is None
         or abs(delta) < 1e-4
         or strike is None
         or dist is None
@@ -572,6 +655,10 @@ def _double_scenario(row: Dict[str, str]) -> Tuple[Optional[float], str]:
 
     spot = _spot_from_strike_dist(strike, dist)
     if spot is None or spot <= 0:
+        return None, ""
+
+    option_price = _price_for_buy(row, spot_price=spot)
+    if option_price is None or option_price <= 0:
         return None, ""
 
     move_abs = option_price / abs(delta)
@@ -730,7 +817,7 @@ def _normalize_ticker(value: Optional[str]) -> str:
 def _cost_pct(row: Dict[str, str], spot_price: Optional[float]) -> Optional[float]:
     if spot_price is None or spot_price <= 0:
         return None
-    option_price = _parse_float(row.get("ultimo"))
+    option_price = _price_for_buy(row, spot_price=spot_price)
     if option_price is None:
         return None
     return (option_price / spot_price) * 100.0
@@ -740,12 +827,102 @@ def _intrinsic_extrinsic(row: Dict[str, str], spot_price: Optional[float]) -> Tu
     if spot_price is None or spot_price <= 0:
         return None, None
     strike = _parse_float(row.get("strike"))
-    option_price = _parse_float(row.get("ultimo"))
+    option_price = _price_for_buy(row, spot_price=spot_price)
     if strike is None or option_price is None:
         return None, None
     intrinsic = max(spot_price - strike, 0.0)
     extrinsic = max(option_price - intrinsic, 0.0)
     return intrinsic, extrinsic
+
+
+def _extrinsic_pct_spot(extrinsic: Optional[float], spot_price: Optional[float]) -> Optional[float]:
+    if extrinsic is None or spot_price is None or spot_price <= 0:
+        return None
+    return (extrinsic / spot_price) * 100.0
+
+
+def _distorcao_preco(price_buy: Optional[float], price_theoretical: Optional[float]) -> Optional[float]:
+    if price_buy is None or price_theoretical is None or price_theoretical <= 0:
+        return None
+    return ((price_buy - price_theoretical) / price_theoretical) * 100.0
+
+
+def _apply_penalties(row: Dict[str, str]) -> None:
+    score = _parse_int(row.get("score_total"))
+    if score is None:
+        score = 0
+    spread = _parse_float(row.get("spread_pct"))
+    if spread is not None and spread > 20.0:
+        score = max(0, int(score / 2))
+    be_dist = _parse_float(row.get("breakeven_dist_pct"))
+    if be_dist is not None and be_dist > 15.0:
+        score = max(0, score - 2)
+    row["score_total"] = str(score)
+
+
+def _breakeven(spot: Optional[float], row: Dict[str, str]) -> Tuple[Optional[float], Optional[float]]:
+    if spot is None or spot <= 0:
+        return None, None
+    strike = _parse_float(row.get("strike"))
+    price = _price_for_buy(row, spot_price=spot)
+    if strike is None or price is None:
+        return None, None
+    be_price = strike + price
+    dist_pct = ((be_price - spot) / spot) * 100.0
+    return be_price, dist_pct
+
+
+def _price_for_buy(row: Dict[str, str], spot_price: Optional[float] = None) -> Optional[float]:
+    ask = _parse_float(row.get("best_ask"))
+    if ask is not None and ask > 0:
+        return ask
+    # Sem ask: tenta preço teórico se tivermos spot
+    if spot_price is not None and spot_price > 0:
+        theoretical = _compute_theoretical_price(row, spot_price=spot_price)
+        if theoretical is not None and theoretical > 0:
+            return theoretical
+    # Último negócio só como último fallback
+    last = _parse_float(row.get("ultimo"))
+    if last is not None and last > 0:
+        return last
+    return None
+
+
+def _compute_spread_pct(row: Dict[str, str]) -> Optional[float]:
+    bid = _parse_float(row.get("best_bid"))
+    ask = _parse_float(row.get("best_ask"))
+    if bid is None or ask is None or bid <= 0 or ask <= 0:
+        return None
+    mid = (bid + ask) / 2.0
+    if mid <= 0:
+        return None
+    return (ask - bid) / mid * 100.0
+
+
+def _compute_theoretical_price(row: Dict[str, str], spot_price: Optional[float]) -> Optional[float]:
+    if spot_price is None or spot_price <= 0:
+        return None
+    vol = _parse_float(row.get("vol_impl_perc"))
+    strike = _parse_float(row.get("strike"))
+    days = _parse_float(row.get("dias_uteis"))
+    if vol is None or strike is None or days is None or days <= 0 or vol <= 0:
+        return None
+    try:
+        return _black_scholes_call(spot_price, strike, vol / 100.0, days / 252.0)
+    except Exception:
+        return None
+
+
+def _black_scholes_call(spot: float, strike: float, vol: float, years: float, rate: float = 0.0, div: float = 0.0) -> float:
+    if spot <= 0 or strike <= 0 or vol <= 0 or years <= 0:
+        return 0.0
+    sqrt_t = math.sqrt(years)
+    d1 = (math.log(spot / strike) + (rate - div + 0.5 * vol * vol) * years) / (vol * sqrt_t)
+    d2 = d1 - vol * sqrt_t
+    # N(x) approx via error function
+    nd1 = 0.5 * (1.0 + math.erf(d1 / math.sqrt(2)))
+    nd2 = 0.5 * (1.0 + math.erf(d2 / math.sqrt(2)))
+    return spot * math.exp(-div * years) * nd1 - strike * math.exp(-rate * years) * nd2
 
 
 def _infer_snapshot_date(rows: Sequence[Dict[str, str]]) -> Optional[str]:

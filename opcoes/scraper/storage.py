@@ -42,6 +42,9 @@ CSV_FIELDS: List[str] = [
     "custo_pct",
     "intrinsic_value",
     "extrinsic_value",
+    "extrinsic_pct_spot",
+    "breakeven_price",
+    "breakeven_dist_pct",
     # Indicadores opcionais (preenchidos se arquivo de fundamentos for fornecido)
     "earnings_yield_ttm",
     "pe_ttm",
@@ -63,6 +66,13 @@ CSV_FIELDS: List[str] = [
     "em2x_score",
     "vol_fluxo_5d",
     "num_fluxo_5d",
+    "best_bid",
+    "best_ask",
+    "spread_pct",
+    "preco_teorico",
+    "distorcao_preco_pct",
+    "distorcao_flag",
+    "illiquidez_flag",
 ]
 
 

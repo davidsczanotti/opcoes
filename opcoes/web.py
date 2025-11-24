@@ -41,6 +41,8 @@ def create_app() -> Flask:
             alerts_map[pos.get("id")] = alert.get("reasons", [])
 
         totals = _compute_totals(data.positions)
+        all_opps = list(data.opportunities) + list(data.theoretical_opportunities)
+        segments = _segment_opportunities(all_opps)
 
         return render_template(
             "index.html",
@@ -52,6 +54,7 @@ def create_app() -> Flask:
             underlying_filter=underlying_filter,
             alerts_map=alerts_map,
             totals=totals,
+            segments=segments,
         )
 
     @app.route("/positions")
@@ -156,6 +159,29 @@ def create_app() -> Flask:
             "total_pl": total_pl,
             "total_pl_pct": total_pl_pct,
         }
+
+    def _segment_opportunities(opps: list[dict]) -> dict:
+        segments = {
+            "carteira": [],
+            "alavancagem": [],
+            "aposta": [],
+        }
+        for o in opps:
+            status = (o.get("Status_Moneyness") or "").lower()
+            delta = o.get("delta")
+            try:
+                delta_val = float(delta) if delta is not None else None
+            except (TypeError, ValueError):
+                delta_val = None
+
+            if "itm" in status or (delta_val is not None and delta_val >= 0.7):
+                segments["carteira"].append(o)
+                continue
+            if "0-5% otm" in status or "colada" in status or "atm" in status:
+                segments["alavancagem"].append(o)
+                continue
+            segments["aposta"].append(o)
+        return segments
 
     return app
 

@@ -10,6 +10,7 @@ from .portfolio import add_position, list_positions, close_position
 from .report import generate_report
 from .snapshot_export import export_snapshot
 from .tax import compute_tax
+from .backfill_yfinance import backfill_prices
 
 
 def parse_args() -> argparse.Namespace:
@@ -90,6 +91,17 @@ def parse_args() -> argparse.Namespace:
             "Obtém P/L e E/P automaticamente do Status Invest para os papéis processados. "
             "Equivale a fornecer fundamentos externos, porém baixados online."
         ),
+    )
+    sc.add_argument(
+        "--backfill-days",
+        type=int,
+        default=90,
+        help="Após o scrape, baixa histórico de preços dos underlyings via yfinance (default: 90 dias). Use 0 para não baixar.",
+    )
+    sc.add_argument(
+        "--no-backfill",
+        action="store_true",
+        help="Não roda o backfill de preços após o scrape.",
     )
 
     ec = sub.add_parser("enrich", help="Enriquece um CSV existente com E/P e P/L")
@@ -225,6 +237,9 @@ def main() -> None:
                 use_status_invest=use_status_invest,
             )
         )
+        # Opcionalmente, roda backfill de preços para viabilizar HV/IV Rank
+        if not args.no_backfill and args.backfill_days > 0:
+            backfill_prices(days=args.backfill_days)
     elif args.cmd == "enrich":
         use_status_invest = bool(args.statusinvest)
         fundamentals_csv = args.fundamentals
@@ -352,8 +367,8 @@ def _print_report(data) -> None:
         print("  Nenhuma opção com score dentro do filtro.")
     else:
         header = (
-            f"{'Ticker':<10} {'Und':<6} {'Score':>5} {'Último':>10} "
-            f"{'%2x':>8} {'Custo%':>8} {'IV%':>6} {'IVr':>5} {'HV':>6} {'IV-HV':>7} {'IVs':>4} {'EM2x':>5} {'Fluxo':>8}"
+            f"{'Ticker':<10} {'Und':<6} {'Score':>5} {'Último':>9} {'Ask':>9} "
+            f"{'Spr%':>6} {'Illq':>5} {'Justo':>9} {'Dist%':>7} {'%2x':>8} {'Custo%':>8} {'Ext%':>6} {'BE':>8} {'BE%':>7} {'IV%':>6} {'IVr':>5} {'HV':>6} {'IV-HV':>7} {'IVs':>4} {'EM2x':>5} {'Fluxo':>8}"
         )
         print(header)
         print("-" * len(header))
@@ -361,9 +376,17 @@ def _print_report(data) -> None:
             print(
                 f"{opp['ticker']:<10} {opp['underlying']:<6} "
                 f"{(opp['score_total'] or '-'):>5} "
-                f"{_format_currency(opp['ultimo']):>10} "
+                f"{_format_currency(opp['ultimo']):>9} "
+                f"{_format_currency(opp.get('best_ask')):>9} "
+                f"{_format_number(opp.get('spread_pct'), digits=1):>6} "
+                f"{('Y' if opp.get('illiquidez_flag') else '-'):>5} "
+                f"{_format_currency(opp.get('preco_teorico')):>9} "
+                f"{_format_number(opp.get('distorcao_preco_pct'), digits=1):>7} "
                 f"{_format_number(opp.get('%_Alta_p_2x')):>8} "
                 f"{_format_number(opp.get('custo_pct')):>8} "
+                f"{_format_number(opp.get('extrinsic_pct_spot')):>6} "
+                f"{_format_currency(opp.get('breakeven_price')):>8} "
+                f"{_format_number(opp.get('breakeven_dist_pct')):>7} "
                 f"{_format_number(opp.get('vol_impl_perc')):>6} "
                 f"{_format_number(opp.get('iv_rank_180d'), digits=1):>5} "
                 f"{_format_number(opp.get('hv_21d')):>6} "

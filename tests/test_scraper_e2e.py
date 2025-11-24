@@ -99,7 +99,6 @@ async def test_select_filters(page: Page) -> None:
     mod_value = await page.locator(selectors.SELECT_MOD_FILTER).input_value()
     assert mod_value == "E"
 
-    rows = await run._collect_table_rows(page, symbol)
+    rows = await run._collect_table_rows(page, symbol, far_quotes={})
     assert rows, "Esperamos pelo menos uma linha após aplicar filtros"
     assert all((row["mod"] == "E" or not row["mod"]) for row in rows)
-

@@ -17,6 +17,9 @@ Como rodar
 Executar coleta
 - Coletar todos os papéis (padrão), saída no `data/opcoes_calls_eu.csv`:
   - `poetry run python -m opcoes.cli scrape`
+  - Após a coleta, roda automaticamente o backfill de preços via yfinance para os underlyings (default: 90 dias) para que HV/IV Rank fiquem com histórico rápido.
+    - Para desabilitar: `--no-backfill`
+    - Para ajustar a janela: `--backfill-days 120` (exemplo)
 
 - Opcional: enriquecer com indicador de preço x lucro (earnings_yield_ttm e pe_ttm) a partir de um CSV de fundamentos:
   - `poetry run python -m opcoes.cli scrape --fundamentals data/fundamentals.csv`
