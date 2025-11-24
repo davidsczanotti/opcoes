@@ -51,6 +51,7 @@
       </form>
 
       <h2 class="h5 mt-4">Top oportunidades</h2>
+      <p class="text-muted small">IV impl = última do book; IV Rank = faixa 180d; HV = vol. hist 21d a partir dos snapshots diários.</p>
       {% if not data.opportunities %}
         <p>Nenhuma opção dentro do filtro de score.</p>
       {% else %}
@@ -66,7 +67,11 @@
                 <th class="text-end">Custo %</th>
                 <th>Data Spot</th>
                 <th class="text-end">D. Úteis</th>
-                <th class="text-end">IV</th>
+                <th class="text-end">IV impl%</th>
+                <th class="text-end">IV Rank</th>
+                <th class="text-end">HV 21d</th>
+                <th class="text-end">IV-HV</th>
+                <th class="text-end">IV Score</th>
                 <th class="text-end">EM2x</th>
                 <th class="text-end">Fluxo 5d</th>
               </tr>
@@ -88,6 +93,18 @@
                   </td>
                   <td>{{ opp.underlying_price_date or '-' }}</td>
                   <td class="text-end">{{ opp.dias_uteis or '-' }}</td>
+                  <td class="text-end">
+                    {% if opp.vol_impl_perc is not none %}{{ "%.2f"|format(opp.vol_impl_perc) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if opp.iv_rank_180d is not none %}{{ "%.1f"|format(opp.iv_rank_180d) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if opp.hv_21d is not none %}{{ "%.2f"|format(opp.hv_21d) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if opp.iv_hv_spread is not none %}{{ "%.2f"|format(opp.iv_hv_spread) }}{% else %}-{% endif %}
+                  </td>
                   <td class="text-end">{{ opp.iv_score if opp.iv_score is not none else '-' }}</td>
                   <td class="text-end">{{ opp.em2x_score if opp.em2x_score is not none else '-' }}</td>
                   <td class="text-end">

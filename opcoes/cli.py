@@ -353,7 +353,7 @@ def _print_report(data) -> None:
     else:
         header = (
             f"{'Ticker':<10} {'Und':<6} {'Score':>5} {'Último':>10} "
-            f"{'%2x':>8} {'Custo%':>8} {'IV':>4} {'EM2x':>5} {'Fluxo':>8}"
+            f"{'%2x':>8} {'Custo%':>8} {'IV%':>6} {'IVr':>5} {'HV':>6} {'IV-HV':>7} {'IVs':>4} {'EM2x':>5} {'Fluxo':>8}"
         )
         print(header)
         print("-" * len(header))
@@ -364,6 +364,10 @@ def _print_report(data) -> None:
                 f"{_format_currency(opp['ultimo']):>10} "
                 f"{_format_number(opp.get('%_Alta_p_2x')):>8} "
                 f"{_format_number(opp.get('custo_pct')):>8} "
+                f"{_format_number(opp.get('vol_impl_perc')):>6} "
+                f"{_format_number(opp.get('iv_rank_180d'), digits=1):>5} "
+                f"{_format_number(opp.get('hv_21d')):>6} "
+                f"{_format_number(opp.get('iv_hv_spread')):>7} "
                 f"{(opp.get('iv_score') if opp.get('iv_score') is not None else '-'):>4} "
                 f"{(opp.get('em2x_score') if opp.get('em2x_score') is not None else '-'):>5} "
                 f"{_format_number(opp.get('vol_fluxo_5d')):>8}"

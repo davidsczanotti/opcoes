@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-import sqlite3
 import datetime as dt
+import math
+import sqlite3
+import statistics
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -22,15 +24,33 @@ class ReportData:
     recurring_window_start: Optional[str]
     recurring_window_days: int
     recurring_snapshot_days: int
+    hv_window_days: int
 
 
-def generate_report(*, min_score: int = 8, limit: int = 20, recurring_days: int = 30, recurring_limit: int = 15) -> ReportData:
+def generate_report(
+    *,
+    min_score: int = 8,
+    limit: int = 20,
+    recurring_days: int = 30,
+    recurring_limit: int = 15,
+    hv_days: int = 21,
+) -> ReportData:
     conn = _connect()
     snapshot_date = _latest_snapshot_date(conn)
     if not snapshot_date:
         conn.close()
         raise RuntimeError("Nenhum snapshot encontrado. Rode o scraper primeiro.")
     opportunities = _fetch_opportunities(conn, snapshot_date, min_score, limit)
+    hv_map = _compute_hv_map(conn, snapshot_date, [o.get("underlying", "") for o in opportunities], hv_days)
+    for opp in opportunities:
+        underlying = (opp.get("underlying") or "").strip().upper()
+        hv = hv_map.get(underlying)
+        opp["hv_21d"] = hv
+        iv = opp.get("vol_impl_perc")
+        if hv is not None and iv is not None:
+            opp["iv_hv_spread"] = iv - hv
+        else:
+            opp["iv_hv_spread"] = None
     recurring_opps, window_start, snapshot_days = _fetch_recurring_opportunities(
         conn, snapshot_date, min_score, recurring_days, recurring_limit
     )
@@ -47,6 +67,7 @@ def generate_report(*, min_score: int = 8, limit: int = 20, recurring_days: int 
         recurring_window_start=window_start,
         recurring_window_days=max(recurring_days, 0),
         recurring_snapshot_days=snapshot_days,
+        hv_window_days=max(hv_days, 0),
     )
 
 
@@ -89,7 +110,9 @@ def _fetch_opportunities(
             "intrinsic_value",
             "extrinsic_value",
             "vol_fluxo_5d",
-            "num_fluxo_5d"
+            "num_fluxo_5d",
+            "iv_rank_180d",
+            "vol_impl_perc"
         FROM option_snapshots
         WHERE snapshot_date = ?
           AND CAST("score_total" AS INTEGER) >= ?
@@ -123,6 +146,8 @@ def _row_to_dict(row: sqlite3.Row) -> Dict[str, object]:
         "extrinsic_value": _parse_decimal(row["extrinsic_value"]),
         "vol_fluxo_5d": _parse_decimal(row["vol_fluxo_5d"]),
         "num_fluxo_5d": _parse_decimal(row["num_fluxo_5d"]),
+        "iv_rank_180d": _parse_decimal(row["iv_rank_180d"]),
+        "vol_impl_perc": _parse_decimal(row["vol_impl_perc"]),
     }
 
 
@@ -237,6 +262,69 @@ def _fetch_recurring_opportunities(
             }
         )
     return results, window_start, snapshot_days
+
+
+def _compute_hv_map(
+    conn: sqlite3.Connection,
+    snapshot_date: str,
+    underlyings: List[str],
+    window_days: int,
+) -> Dict[str, Optional[float]]:
+    unique = sorted({(u or "").strip().upper() for u in underlyings if (u or "").strip()})
+    if not unique or window_days <= 0:
+        return {}
+    try:
+        latest = dt.date.fromisoformat(snapshot_date)
+        start_date = (latest - dt.timedelta(days=window_days * 2)).isoformat()
+    except ValueError:
+        start_date = snapshot_date
+
+    placeholders = ",".join(["?"] * len(unique))
+    query = f"""
+        SELECT underlying, snapshot_date, price
+        FROM underlying_snapshots
+        WHERE underlying IN ({placeholders})
+          AND snapshot_date BETWEEN ? AND ?
+        ORDER BY underlying, snapshot_date
+    """
+    rows = conn.execute(query, (*unique, start_date, snapshot_date)).fetchall()
+
+    grouped: Dict[str, Dict[str, float]] = {}
+    for row in rows:
+        sym = (row["underlying"] or "").strip().upper()
+        try:
+            price_val = float(row["price"])
+        except (TypeError, ValueError):
+            continue
+        date_val = (row["snapshot_date"] or "").strip()
+        if not sym or not date_val:
+            continue
+        grouped.setdefault(sym, {})[date_val] = price_val
+
+    hv_map: Dict[str, Optional[float]] = {}
+    for sym, price_by_date in grouped.items():
+        if len(price_by_date) < 2:
+            hv_map[sym] = None
+            continue
+        sorted_prices = [price_by_date[d] for d in sorted(price_by_date)]
+        log_returns: List[float] = []
+        for prev, curr in zip(sorted_prices, sorted_prices[1:]):
+            if prev is None or curr is None or prev <= 0 or curr <= 0:
+                continue
+            try:
+                log_returns.append(math.log(curr / prev))
+            except ValueError:
+                continue
+        if len(log_returns) < 2:
+            hv_map[sym] = None
+            continue
+        try:
+            std_dev = statistics.stdev(log_returns)
+            hv = std_dev * math.sqrt(252) * 100.0
+            hv_map[sym] = hv
+        except statistics.StatisticsError:
+            hv_map[sym] = None
+    return hv_map
 
 
 def _parse_decimal(value: Optional[str]) -> Optional[float]:
