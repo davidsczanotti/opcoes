@@ -127,7 +127,7 @@
                     {% if opp.illiquidez_flag %}
                       <span class="badge text-bg-warning">Illiq</span>
                     {% elif opp.best_ask is none and opp.preco_teorico is not none %}
-                      <span class="badge text-bg-info">Liquidez oculta</span>
+                      <span class="badge text-bg-info" title="Preço de tela desatualizado; tente ordem limitada perto do preço justo.">Liquidez oculta</span>
                     {% else %}
                       -
                     {% endif %}
@@ -160,7 +160,7 @@
                     {% if opp.vol_impl_perc is not none %}{{ "%.2f"|format(opp.vol_impl_perc) }}{% else %}-{% endif %}
                   </td>
                   <td class="text-end">
-                    {% if opp.iv_rank_180d is not none %}{{ "%.1f"|format(opp.iv_rank_180d) }}{% else %}-{% endif %}
+                    {% if opp.iv_rank_180d is not none %}{{ "%.1f"|format(opp.iv_rank_180d) }}{% else %}N/A{% endif %}
                   </td>
                   <td class="text-end">
                     {% if opp.hv_21d is not none %}{{ "%.2f"|format(opp.hv_21d) }}{% else %}-{% endif %}
@@ -249,7 +249,7 @@
                     {% if opp.vol_impl_perc is not none %}{{ "%.2f"|format(opp.vol_impl_perc) }}{% else %}-{% endif %}
                   </td>
                   <td class="text-end">
-                    {% if opp.iv_rank_180d is not none %}{{ "%.1f"|format(opp.iv_rank_180d) }}{% else %}-{% endif %}
+                    {% if opp.iv_rank_180d is not none %}{{ "%.1f"|format(opp.iv_rank_180d) }}{% else %}N/A{% endif %}
                   </td>
                   <td class="text-end">
                     {% if opp.hv_21d is not none %}{{ "%.2f"|format(opp.hv_21d) }}{% else %}-{% endif %}
@@ -378,7 +378,7 @@
                       {% if opp.illiquidez_flag %}
                         <span class="badge text-bg-warning">Illiq</span>
                       {% elif opp.best_ask is none and opp.preco_teorico is not none %}
-                        <span class="badge text-bg-info">Liquidez oculta</span>
+                        <span class="badge text-bg-info" title="Preço de tela desatualizado; tente ordem limitada perto do preço justo.">Liquidez oculta</span>
                       {% else %}
                         -
                       {% endif %}
@@ -387,7 +387,7 @@
                       {% if opp.vol_impl_perc is not none %}{{ "%.2f"|format(opp.vol_impl_perc) }}{% else %}-{% endif %}
                     </td>
                     <td class="text-end">
-                      {% if opp.iv_rank_180d is not none %}{{ "%.1f"|format(opp.iv_rank_180d) }}{% else %}-{% endif %}
+                    {% if opp.iv_rank_180d is not none %}{{ "%.1f"|format(opp.iv_rank_180d) }}{% else %}N/A{% endif %}
                     </td>
                     <td class="text-end">
                       {% if opp.hv_21d is not none %}{{ "%.2f"|format(opp.hv_21d) }}{% else %}-{% endif %}
