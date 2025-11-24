@@ -16,12 +16,21 @@ def create_app() -> Flask:
     def index() -> str:
         min_score = _get_int_arg("min_score", 8)
         limit = _get_int_arg("limit", 30)
+        recurring_days = _get_int_arg("recurring_days", 30)
+        recurring_limit = _get_int_arg("recurring_limit", 15)
         underlying_filter = request.args.get("underlying", "").strip().upper()
 
-        data = generate_report(min_score=min_score, limit=limit)
+        data = generate_report(min_score=min_score, limit=limit, recurring_days=recurring_days, recurring_limit=recurring_limit)
         if underlying_filter:
             data.opportunities = [
-                o for o in data.opportunities if underlying_filter in o["underlying"].upper() or underlying_filter in o["ticker"].upper()
+                o
+                for o in data.opportunities
+                if underlying_filter in (o.get("underlying") or "").upper() or underlying_filter in (o.get("ticker") or "").upper()
+            ]
+            data.recurring_opportunities = [
+                o
+                for o in data.recurring_opportunities
+                if underlying_filter in (o.get("underlying") or "").upper() or underlying_filter in (o.get("ticker") or "").upper()
             ]
 
         alerts_map = {}
@@ -38,6 +47,8 @@ def create_app() -> Flask:
             data=data,
             min_score=min_score,
             limit=limit,
+            recurring_days=recurring_days,
+            recurring_limit=recurring_limit,
             underlying_filter=underlying_filter,
             alerts_map=alerts_map,
             totals=totals,

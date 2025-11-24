@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import datetime as dt
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -17,20 +18,36 @@ class ReportData:
     opportunities: List[Dict[str, object]]
     positions: List[Dict[str, object]]
     alerts: List[Dict[str, object]]
+    recurring_opportunities: List[Dict[str, object]]
+    recurring_window_start: Optional[str]
+    recurring_window_days: int
+    recurring_snapshot_days: int
 
 
-def generate_report(*, min_score: int = 8, limit: int = 20) -> ReportData:
+def generate_report(*, min_score: int = 8, limit: int = 20, recurring_days: int = 30, recurring_limit: int = 15) -> ReportData:
     conn = _connect()
     snapshot_date = _latest_snapshot_date(conn)
     if not snapshot_date:
         conn.close()
         raise RuntimeError("Nenhum snapshot encontrado. Rode o scraper primeiro.")
     opportunities = _fetch_opportunities(conn, snapshot_date, min_score, limit)
+    recurring_opps, window_start, snapshot_days = _fetch_recurring_opportunities(
+        conn, snapshot_date, min_score, recurring_days, recurring_limit
+    )
     conn.close()
 
     positions = list_positions(include_closed=False)
     alerts = _build_alerts(positions, min_score=min_score)
-    return ReportData(snapshot_date=snapshot_date, opportunities=opportunities, positions=positions, alerts=alerts)
+    return ReportData(
+        snapshot_date=snapshot_date,
+        opportunities=opportunities,
+        positions=positions,
+        alerts=alerts,
+        recurring_opportunities=recurring_opps,
+        recurring_window_start=window_start,
+        recurring_window_days=max(recurring_days, 0),
+        recurring_snapshot_days=snapshot_days,
+    )
 
 
 def _connect() -> sqlite3.Connection:
@@ -86,53 +103,26 @@ def _fetch_opportunities(
 
 
 def _row_to_dict(row: sqlite3.Row) -> Dict[str, object]:
-    def parse_decimal(value: Optional[str]) -> Optional[float]:
-        if value is None:
-            return None
-        value = value.strip()
-        if not value:
-            return None
-        value = (
-            value.replace("%", "")
-            .replace("+", "")
-            .replace("\u2212", "-")
-            .replace("−", "-")
-            .replace(".", "")
-            .replace(",", ".")
-        )
-        try:
-            return float(value)
-        except ValueError:
-            return None
-
-    def parse_int(value: Optional[str]) -> Optional[int]:
-        if value is None:
-            return None
-        try:
-            return int(str(value).strip())
-        except ValueError:
-            return None
-
     return {
         "ticker": row["ticker"],
         "underlying": row["underlying"],
-        "score_total": parse_int(row["score_total"]),
+        "score_total": _parse_int(row["score_total"]),
         "trend_flag": row["trend_flag"],
         "underlying_price_date": row["underlying_price_date"],
-        "dias_uteis": parse_int(row["dias_uteis"]),
+        "dias_uteis": _parse_int(row["dias_uteis"]),
         "Status_Moneyness": row["Status_Moneyness"],
         "Status_Liquidez": row["Status_Liquidez"],
         "Status_2x": row["Status_2x"],
-        "iv_score": parse_int(row["iv_score"]),
-        "em2x_score": parse_int(row["em2x_score"]),
-        "ultimo": parse_decimal(row["ultimo"]),
-        "underlying_price": parse_decimal(row["underlying_price"]),
-        "%_Alta_p_2x": parse_decimal(row["%_Alta_p_2x"]),
-        "custo_pct": parse_decimal(row["custo_pct"]),
-        "intrinsic_value": parse_decimal(row["intrinsic_value"]),
-        "extrinsic_value": parse_decimal(row["extrinsic_value"]),
-        "vol_fluxo_5d": parse_decimal(row["vol_fluxo_5d"]),
-        "num_fluxo_5d": parse_decimal(row["num_fluxo_5d"]),
+        "iv_score": _parse_int(row["iv_score"]),
+        "em2x_score": _parse_int(row["em2x_score"]),
+        "ultimo": _parse_decimal(row["ultimo"]),
+        "underlying_price": _parse_decimal(row["underlying_price"]),
+        "%_Alta_p_2x": _parse_decimal(row["%_Alta_p_2x"]),
+        "custo_pct": _parse_decimal(row["custo_pct"]),
+        "intrinsic_value": _parse_decimal(row["intrinsic_value"]),
+        "extrinsic_value": _parse_decimal(row["extrinsic_value"]),
+        "vol_fluxo_5d": _parse_decimal(row["vol_fluxo_5d"]),
+        "num_fluxo_5d": _parse_decimal(row["num_fluxo_5d"]),
     }
 
 
@@ -169,6 +159,113 @@ def _build_alerts(positions: List[Dict[str, object]], *, min_score: int) -> List
         if reasons:
             alerts.append({"position": pos, "reasons": reasons})
     return alerts
+
+
+def _fetch_recurring_opportunities(
+    conn: sqlite3.Connection,
+    latest_snapshot_date: str,
+    min_score: int,
+    history_days: int,
+    limit: int,
+) -> tuple[List[Dict[str, object]], Optional[str], int]:
+    if history_days <= 0:
+        window_start = latest_snapshot_date
+    else:
+        try:
+            latest = dt.date.fromisoformat(latest_snapshot_date)
+            window_start = (latest - dt.timedelta(days=history_days - 1)).isoformat()
+        except ValueError:
+            window_start = latest_snapshot_date
+
+    total_snapshots_row = conn.execute(
+        "SELECT COUNT(DISTINCT snapshot_date) FROM option_snapshots WHERE snapshot_date >= ?",
+        (window_start,),
+    ).fetchone()
+    snapshot_days = int(total_snapshots_row[0] or 0) if total_snapshots_row else 0
+
+    filtered_query = """
+        WITH filtered AS (
+            SELECT *
+            FROM option_snapshots
+            WHERE snapshot_date >= ?
+              AND CAST("score_total" AS INTEGER) >= ?
+              AND ("trend_flag" = '1' OR "trend_flag" = '')
+        ),
+        agg AS (
+            SELECT
+                ticker,
+                MAX(underlying) AS underlying,
+                COUNT(*) AS hits,
+                MIN(snapshot_date) AS first_seen,
+                MAX(snapshot_date) AS last_seen
+            FROM filtered
+            GROUP BY ticker
+        )
+        SELECT
+            agg.ticker,
+            agg.underlying,
+            agg.hits,
+            agg.first_seen,
+            agg.last_seen,
+            f.score_total AS last_score,
+            f."%_Alta_p_2x" AS pct_2x,
+            f.ultimo AS last_price,
+            f.underlying_price AS last_underlying_price,
+            f.dias_uteis AS dias_uteis
+        FROM agg
+        LEFT JOIN filtered f ON f.ticker = agg.ticker AND f.snapshot_date = agg.last_seen
+        ORDER BY agg.hits DESC, agg.last_seen DESC
+        LIMIT ?
+    """
+    rows = conn.execute(filtered_query, (window_start, min_score, limit)).fetchall()
+    results: List[Dict[str, object]] = []
+    for row in rows:
+        hits = _parse_int(row["hits"]) or 0
+        results.append(
+            {
+                "ticker": row["ticker"],
+                "underlying": row["underlying"],
+                "hits": hits,
+                "presence_pct": (hits / snapshot_days * 100.0) if snapshot_days else None,
+                "first_seen": row["first_seen"],
+                "last_seen": row["last_seen"],
+                "score_total": _parse_int(row["last_score"]),
+                "%_Alta_p_2x": _parse_decimal(row["pct_2x"]),
+                "ultimo": _parse_decimal(row["last_price"]),
+                "underlying_price": _parse_decimal(row["last_underlying_price"]),
+                "dias_uteis": _parse_int(row["dias_uteis"]),
+            }
+        )
+    return results, window_start, snapshot_days
+
+
+def _parse_decimal(value: Optional[str]) -> Optional[float]:
+    if value is None:
+        return None
+    value = str(value).strip()
+    if not value:
+        return None
+    value = (
+        value.replace("%", "")
+        .replace("+", "")
+        .replace("\u2212", "-")
+        .replace("−", "-")
+        .replace(".", "")
+        .replace(",", ".")
+    )
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
+def _parse_int(value: Optional[str]) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        return int(str(value).strip())
+    except ValueError:
+        return None
 
 
 __all__ = ["generate_report", "ReportData"]

@@ -37,7 +37,15 @@
           <label class="form-label">Filtro de ativo/ticker (contém)</label>
           <input name="underlying" class="form-control form-control-sm" value="{{ underlying_filter }}">
         </div>
-        <div class="col-sm-2 align-self-end">
+        <div class="col-sm-2">
+          <label class="form-label">Recorrentes (dias)</label>
+          <input type="number" name="recurring_days" class="form-control form-control-sm" value="{{ recurring_days }}">
+        </div>
+        <div class="col-sm-2">
+          <label class="form-label">Limite recorrentes</label>
+          <input type="number" name="recurring_limit" class="form-control form-control-sm" value="{{ recurring_limit }}">
+        </div>
+        <div class="col-sm-1 align-self-end">
           <button class="btn btn-primary btn-sm" type="submit">Aplicar</button>
         </div>
       </form>
@@ -84,6 +92,61 @@
                   <td class="text-end">{{ opp.em2x_score if opp.em2x_score is not none else '-' }}</td>
                   <td class="text-end">
                     {% if opp.vol_fluxo_5d is not none %}{{ "%.2f"|format(opp.vol_fluxo_5d) }}{% else %}-{% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+
+      <h2 class="h5 mt-4">Oportunidades recorrentes</h2>
+      <p class="text-muted small mb-2">
+        Conta quantas vezes a opção entrou no filtro (score ≥ {{ min_score }}, trend=1 ou vazio) nos últimos
+        {{ data.recurring_window_days }} dias. Janela a partir de {{ data.recurring_window_start or '-' }}
+        ({{ data.recurring_snapshot_days }} snapshots disponíveis).
+      </p>
+      {% if not data.recurring_opportunities %}
+        <p>Nenhuma recorrência dentro da janela.</p>
+      {% else %}
+        <div class="table-responsive">
+          <table class="table table-sm table-striped align-middle">
+            <thead class="table-light">
+              <tr>
+                <th>Ticker</th>
+                <th>Ativo</th>
+                <th class="text-end">Dias no ranking</th>
+                <th class="text-end">Presença</th>
+                <th class="text-end">Última data</th>
+                <th class="text-end">Score</th>
+                <th class="text-end">Último</th>
+                <th class="text-end">% p/ 2x</th>
+                <th class="text-end">Spot</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for opp in data.recurring_opportunities %}
+                <tr>
+                  <td>{{ opp.ticker }}</td>
+                  <td>{{ opp.underlying }}</td>
+                  <td class="text-end">{{ opp.hits }}</td>
+                  <td class="text-end">
+                    {% if opp.presence_pct is not none %}
+                      {{ "%.0f"|format(opp.presence_pct) }}%
+                    {% else %}
+                      -
+                    {% endif %}
+                  </td>
+                  <td class="text-end">{{ opp.last_seen or '-' }}</td>
+                  <td class="text-end">{{ opp.score_total or '-' }}</td>
+                  <td class="text-end">
+                    {% if opp.ultimo is not none %}{{ "%.2f"|format(opp.ultimo) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if opp["%_Alta_p_2x"] is not none %}{{ "%.2f"|format(opp["%_Alta_p_2x"]) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if opp.underlying_price is not none %}{{ "%.2f"|format(opp.underlying_price) }}{% else %}-{% endif %}
                   </td>
                 </tr>
               {% endfor %}

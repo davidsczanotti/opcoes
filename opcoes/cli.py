@@ -368,6 +368,31 @@ def _print_report(data) -> None:
                 f"{(opp.get('em2x_score') if opp.get('em2x_score') is not None else '-'):>5} "
                 f"{_format_number(opp.get('vol_fluxo_5d')):>8}"
             )
+    print(
+        "\nOportunidades recorrentes "
+        f"(últimos {data.recurring_window_days} dias, {data.recurring_snapshot_days} snapshots desde {data.recurring_window_start}):"
+    )
+    if not data.recurring_opportunities:
+        print("  Nenhuma recorrência dentro da janela.")
+    else:
+        header = (
+            f"{'Ticker':<10} {'Und':<6} {'Dias':>5} {'Presença':>9} {'Última':>10} "
+            f"{'Score':>6} {'Último':>10} {'%2x':>8} {'Spot':>8}"
+        )
+        print(header)
+        print("-" * len(header))
+        for opp in data.recurring_opportunities:
+            presence = f"{opp['presence_pct']:.0f}%" if opp.get("presence_pct") is not None else "-"
+            print(
+                f"{opp['ticker']:<10} {opp['underlying']:<6} "
+                f"{opp['hits']:>5d} "
+                f"{presence:>9} "
+                f"{(opp.get('last_seen') or '-'):>10} "
+                f"{(opp.get('score_total') or '-'):>6} "
+                f"{_format_currency(opp.get('ultimo')):>10} "
+                f"{_format_number(opp.get('%_Alta_p_2x')):>8} "
+                f"{_format_number(opp.get('underlying_price')):>8}"
+            )
     print("\nPosições abertas:")
     positions = data.positions
     if not positions:
