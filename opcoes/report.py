@@ -58,6 +58,12 @@ def generate_report(
             opp["desconto_teorico_pct"] = (theo - ask) / theo * 100.0
         else:
             opp["desconto_teorico_pct"] = None
+        if theo is not None and theo > 0:
+            opp["preco_max_10_pct"] = theo * 1.10
+            opp["preco_max_20_pct"] = theo * 1.20
+        else:
+            opp["preco_max_10_pct"] = None
+            opp["preco_max_20_pct"] = None
     recurring_opps, window_start, snapshot_days = _fetch_recurring_opportunities(
         conn, snapshot_date, min_score, recurring_days, recurring_limit
     )

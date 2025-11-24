@@ -71,6 +71,8 @@
                 <th class="text-end">Último</th>
                 <th class="text-end">Ask / Ref.</th>
                 <th class="text-end">Desc. teórico%</th>
+                <th class="text-end">P. máx 10%</th>
+                <th class="text-end">P. máx 20%</th>
                 <th class="text-end">Spread%</th>
                 <th class="text-end">Illiq?</th>
                 <th class="text-end">Preço justo</th>
@@ -101,10 +103,15 @@
                     {% if opp.ultimo is not none %}{{ "%.2f"|format(opp.ultimo) }}{% else %}-{% endif %}
                   </td>
                   <td class="text-end">
-                    {% if opp.best_ask is not none %}
-                      {{ "%.2f"|format(opp.best_ask) }}
-                    {% elif opp.preco_teorico is not none %}
-                      {{ "%.2f"|format(opp.preco_teorico) }}
+                    {% set ref_price = opp.best_ask if opp.best_ask is not none else opp.preco_teorico %}
+                    {% if ref_price is not none %}
+                      {% if opp.preco_max_20_pct is not none and ref_price > opp.preco_max_20_pct %}
+                        <span class="text-danger fw-semibold" title="Acima do teto de 20% sobre o preço teórico.">{{ "%.2f"|format(ref_price) }}</span>
+                      {% elif opp.preco_max_10_pct is not none and ref_price > opp.preco_max_10_pct %}
+                        <span class="text-warning fw-semibold" title="Entre 10% e 20% acima do preço teórico.">{{ "%.2f"|format(ref_price) }}</span>
+                      {% else %}
+                        {{ "%.2f"|format(ref_price) }}
+                      {% endif %}
                     {% else %}
                       -
                     {% endif %}
@@ -116,6 +123,20 @@
                       {% else %}
                         {{ "%.1f"|format(opp.desconto_teorico_pct) }}%
                       {% endif %}
+                    {% else %}
+                      -
+                    {% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if opp.preco_max_10_pct is not none %}
+                      {{ "%.2f"|format(opp.preco_max_10_pct) }}
+                    {% else %}
+                      -
+                    {% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if opp.preco_max_20_pct is not none %}
+                      {{ "%.2f"|format(opp.preco_max_20_pct) }}
                     {% else %}
                       -
                     {% endif %}
