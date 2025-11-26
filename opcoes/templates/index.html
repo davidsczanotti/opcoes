@@ -201,6 +201,78 @@
         </div>
       {% endif %}
 
+      <h3 class="h6 mt-4">Top Apostas Racionais</h3>
+      {% if not data.rational_opportunities %}
+        <p class="text-muted small">Nenhuma dentro do filtro.</p>
+      {% else %}
+        <div class="table-responsive">
+          <table class="table table-sm table-striped align-middle">
+            <thead class="table-light">
+              <tr>
+                <th>Ticker</th>
+                <th>Ativo</th>
+                <th class="text-end">Score</th>
+                <th class="text-end">Prob ITM%</th>
+                <th class="text-end">Extr.% Spot</th>
+                <th class="text-end">% p/ 2x</th>
+                <th class="text-end">Custo%</th>
+                <th class="text-end">D. Úteis</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for opp in data.rational_opportunities %}
+                <tr>
+                  <td>{{ opp.ticker }}</td>
+                  <td>{{ opp.underlying }}</td>
+                  <td class="text-end">{{ opp.score_total or '-' }}</td>
+                  <td class="text-end">{{ opp.prob_itm_pct is not none and ('%.1f'|format(opp.prob_itm_pct)) or '-' }}</td>
+                  <td class="text-end">{{ opp.extrinsic_pct_spot is not none and ('%.1f'|format(opp.extrinsic_pct_spot)) or '-' }}</td>
+                  <td class="text-end">{{ opp['%_Alta_p_2x'] is not none and ('%.1f'|format(opp['%_Alta_p_2x'])) or '-' }}</td>
+                  <td class="text-end">{{ opp.custo_pct is not none and ('%.1f'|format(opp.custo_pct)) or '-' }}</td>
+                  <td class="text-end">{{ opp.dias_uteis or '-' }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+
+      <h3 class="h6 mt-4">Top Loterias</h3>
+      {% if not data.lottery_opportunities %}
+        <p class="text-muted small">Nenhuma dentro do filtro.</p>
+      {% else %}
+        <div class="table-responsive">
+          <table class="table table-sm table-striped align-middle">
+            <thead class="table-light">
+              <tr>
+                <th>Ticker</th>
+                <th>Ativo</th>
+                <th class="text-end">Score</th>
+                <th class="text-end">Prob ITM%</th>
+                <th class="text-end">Extr.% Spot</th>
+                <th class="text-end">% p/ 2x</th>
+                <th class="text-end">Custo%</th>
+                <th class="text-end">D. Úteis</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for opp in data.lottery_opportunities %}
+                <tr>
+                  <td>{{ opp.ticker }}</td>
+                  <td>{{ opp.underlying }}</td>
+                  <td class="text-end">{{ opp.score_total or '-' }}</td>
+                  <td class="text-end">{{ opp.prob_itm_pct is not none and ('%.1f'|format(opp.prob_itm_pct)) or '-' }}</td>
+                  <td class="text-end">{{ opp.extrinsic_pct_spot is not none and ('%.1f'|format(opp.extrinsic_pct_spot)) or '-' }}</td>
+                  <td class="text-end">{{ opp['%_Alta_p_2x'] is not none and ('%.1f'|format(opp['%_Alta_p_2x'])) or '-' }}</td>
+                  <td class="text-end">{{ opp.custo_pct is not none and ('%.1f'|format(opp.custo_pct)) or '-' }}</td>
+                  <td class="text-end">{{ opp.dias_uteis or '-' }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+
       <h2 class="h5 mt-4">Oportunidades teóricas (liquidez oculta)</h2>
       <p class="text-muted small">
         Opções sem ask visível no book, mas com preço teórico atrativo. Execução pode depender de market maker reagindo a ordens próximas ao preço justo.
