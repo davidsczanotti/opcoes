@@ -7,7 +7,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .scraper.fundamentals import load_earnings_yield_map
 from .scraper.statusinvest import fetch_fundamentals_map
-from .scraper.storage import CSV_FIELDS, _ensure_parent
+from .scraper.storage import CSV_FIELDS, CSV_WRITER_KWARGS, _csv_reader, _ensure_parent, normalize_csv_row
 
 
 def _unique(seq: Iterable[str]) -> List[str]:
@@ -15,7 +15,7 @@ def _unique(seq: Iterable[str]) -> List[str]:
 
 
 def _format_opt(v: Optional[float]) -> str:
-    return f"{v:.6f}" if v is not None else ""
+    return f"{v:.6f}".replace(".", ",") if v is not None else ""
 
 
 def enrich_csv(
@@ -42,8 +42,8 @@ def enrich_csv(
 
     # Lê arquivo de entrada como dicts
     with input_csv.open("r", newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        rows: List[Dict[str, str]] = list(reader)
+        reader, _ = _csv_reader(f)
+        rows: List[Dict[str, str]] = [normalize_csv_row(r) for r in reader]
 
     underlyings = _unique([str(r.get("underlying", "")).strip().upper() for r in rows])
 
@@ -62,7 +62,7 @@ def enrich_csv(
     _ensure_parent(output_csv)
     tmp_path = output_csv.with_suffix(output_csv.suffix + ".tmp")
     with tmp_path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
+        writer = csv.DictWriter(f, fieldnames=CSV_FIELDS, **CSV_WRITER_KWARGS)
         writer.writeheader()
         for row in rows:
             out = {k: row.get(k, "") for k in CSV_FIELDS}
@@ -70,7 +70,7 @@ def enrich_csv(
             ey, pe = fundamentals_map.get(sym, (None, None))
             out["earnings_yield_ttm"] = _format_opt(ey)
             out["pe_ttm"] = _format_opt(pe)
-            writer.writerow(out)
+            writer.writerow(normalize_csv_row(out))
 
     os.replace(tmp_path, output_csv)
     return output_csv

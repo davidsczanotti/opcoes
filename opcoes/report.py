@@ -19,6 +19,8 @@ class ReportData:
     snapshot_date: str
     opportunities: List[Dict[str, object]]
     theoretical_opportunities: List[Dict[str, object]]
+    rational_opportunities: List[Dict[str, object]]
+    lottery_opportunities: List[Dict[str, object]]
     positions: List[Dict[str, object]]
     alerts: List[Dict[str, object]]
     recurring_opportunities: List[Dict[str, object]]
@@ -77,12 +79,16 @@ def generate_report(
         elif opp.get("preco_teorico") is not None:
             theoretical_opps.append(opp)
 
+    rational_opps, lottery_opps = _split_remote_lists(tradeable_opps, limit=5)
+
     positions = list_positions(include_closed=False)
     alerts = _build_alerts(positions, min_score=min_score)
     return ReportData(
         snapshot_date=snapshot_date,
         opportunities=tradeable_opps,
         theoretical_opportunities=theoretical_opps,
+        rational_opportunities=rational_opps,
+        lottery_opportunities=lottery_opps,
         positions=positions,
         alerts=alerts,
         recurring_opportunities=recurring_opps,
@@ -145,18 +151,21 @@ def _fetch_opportunities(
             "preco_teorico",
             "distorcao_preco_pct",
             "distorcao_flag",
-            "illiquidez_flag"
+            "illiquidez_flag",
+            "Status_Remoto",
+            "prob_itm_pct",
+            "prob_itm_delta_pct"
         FROM option_snapshots
         WHERE snapshot_date = ?
-          AND CAST("score_total" AS INTEGER) >= ?
+          AND CAST(REPLACE("score_total", ',', '.') AS REAL) >= ?
           AND ("trend_flag" = '1' OR "trend_flag" = '')
           AND (
                 "distorcao_flag" IS NULL
              OR "distorcao_flag" = ''
              OR ABS(CAST("distorcao_preco_pct" AS REAL)) <= 50.0
           )
-        ORDER BY CAST("score_total" AS INTEGER) DESC,
-                 CAST("%_Alta_p_2x" AS REAL) ASC NULLS LAST
+        ORDER BY CAST(REPLACE("score_total", ',', '.') AS REAL) DESC,
+                 CAST(REPLACE("%_Alta_p_2x", ',', '.') AS REAL) ASC NULLS LAST
         LIMIT ?
     """
     rows = conn.execute(query, (snapshot_date, min_score, limit)).fetchall()
@@ -167,14 +176,14 @@ def _row_to_dict(row: sqlite3.Row) -> Dict[str, object]:
     return {
         "ticker": row["ticker"],
         "underlying": row["underlying"],
-        "score_total": _parse_int(row["score_total"]),
+        "score_total": _parse_decimal(row["score_total"]),
         "trend_flag": row["trend_flag"],
         "underlying_price_date": row["underlying_price_date"],
         "dias_uteis": _parse_int(row["dias_uteis"]),
         "Status_Moneyness": row["Status_Moneyness"],
         "Status_Liquidez": row["Status_Liquidez"],
         "Status_2x": row["Status_2x"],
-        "iv_score": _parse_int(row["iv_score"]),
+        "iv_score": _parse_decimal(row["iv_score"]),
         "em2x_score": _parse_int(row["em2x_score"]),
         "delta": _parse_decimal(row["delta"]),
         "ultimo": _parse_decimal(row["ultimo"]),
@@ -197,6 +206,9 @@ def _row_to_dict(row: sqlite3.Row) -> Dict[str, object]:
         "distorcao_preco_pct": _parse_decimal(row["distorcao_preco_pct"]),
         "distorcao_flag": (row["distorcao_flag"] or "").strip(),
         "illiquidez_flag": (row["illiquidez_flag"] or "").strip(),
+        "Status_Remoto": (row["Status_Remoto"] or "").strip(),
+        "prob_itm_pct": _parse_decimal(row["prob_itm_pct"]),
+        "prob_itm_delta_pct": _parse_decimal(row["prob_itm_delta_pct"]),
     }
 
 
@@ -214,10 +226,10 @@ def _build_alerts(positions: List[Dict[str, object]], *, min_score: int) -> List
 
         if score not in (None, ""):
             try:
-                score_int = int(score)
-                if score_int < min_score:
-                    reasons.append(f"Score baixo ({score_int})")
-            except ValueError:
+                score_val = float(score)
+                if score_val < min_score:
+                    reasons.append(f"Score baixo ({score_val:.2f})")
+            except (TypeError, ValueError):
                 pass
 
         if pl_pct is not None:
@@ -262,7 +274,7 @@ def _fetch_recurring_opportunities(
             SELECT *
             FROM option_snapshots
             WHERE snapshot_date >= ?
-              AND CAST("score_total" AS INTEGER) >= ?
+              AND CAST(REPLACE("score_total", ',', '.') AS REAL) >= ?
               AND ("trend_flag" = '1' OR "trend_flag" = '')
         ),
         agg AS (
@@ -303,7 +315,7 @@ def _fetch_recurring_opportunities(
                 "presence_pct": (hits / snapshot_days * 100.0) if snapshot_days else None,
                 "first_seen": row["first_seen"],
                 "last_seen": row["last_seen"],
-                "score_total": _parse_int(row["last_score"]),
+                "score_total": _parse_decimal(row["last_score"]),
                 "%_Alta_p_2x": _parse_decimal(row["pct_2x"]),
                 "ultimo": _parse_decimal(row["last_price"]),
                 "underlying_price": _parse_decimal(row["last_underlying_price"]),
@@ -405,6 +417,27 @@ def _parse_int(value: Optional[str]) -> Optional[int]:
         return int(str(value).strip())
     except ValueError:
         return None
+
+
+def _split_remote_lists(
+    opps: List[Dict[str, object]],
+    *,
+    limit: int = 5,
+) -> tuple[List[Dict[str, object]], List[Dict[str, object]]]:
+    def _status(val: Optional[str]) -> str:
+        return (val or "").strip().lower()
+
+    def _score(o: Dict[str, object]) -> float:
+        try:
+            return float(o.get("score_total") or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    rational = [o for o in opps if "aposta" in _status(o.get("Status_Remoto"))]
+    lottery = [o for o in opps if "loteria" in _status(o.get("Status_Remoto"))]
+    rational = sorted(rational, key=_score, reverse=True)[:limit]
+    lottery = sorted(lottery, key=_score, reverse=True)[:limit]
+    return rational, lottery
 
 
 __all__ = ["generate_report", "ReportData"]

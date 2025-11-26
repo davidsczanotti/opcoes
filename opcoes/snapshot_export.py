@@ -5,7 +5,7 @@ import sqlite3
 from pathlib import Path
 from typing import Optional, Sequence
 
-from .scraper.storage import CSV_FIELDS, _ensure_parent
+from .scraper.storage import CSV_FIELDS, CSV_WRITER_KWARGS, _ensure_parent, normalize_csv_row
 
 DB_PATH = Path("data/opcoes_snapshots.db")
 
@@ -46,14 +46,13 @@ def export_snapshot(
         conn.close()
 
     with output_csv.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
+        writer = csv.DictWriter(f, fieldnames=CSV_FIELDS, **CSV_WRITER_KWARGS)
         writer.writeheader()
         for r in rows:
             out_row = {col: (r[col] if col in r.keys() and r[col] is not None else "") for col in CSV_FIELDS}
-            writer.writerow(out_row)
+            writer.writerow(normalize_csv_row(out_row))
 
     return output_csv
 
 
 __all__ = ["export_snapshot"]
-

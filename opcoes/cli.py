@@ -420,6 +420,42 @@ def _print_report(data) -> None:
                 f"{_format_number(opp.get('%_Alta_p_2x')):>8} "
                 f"{_format_number(opp.get('underlying_price')):>8}"
             )
+    print("\nTop Apostas Racionais (até 5):")
+    if not data.rational_opportunities:
+        print("  Nenhuma dentro do filtro.")
+    else:
+        header = f"{'Ticker':<10} {'Und':<6} {'Score':>6} {'Prob%':>7} {'Extr%':>7} {'%2x':>8} {'Custo%':>8} {'Dias':>5}"
+        print(header)
+        print("-" * len(header))
+        for opp in data.rational_opportunities:
+            prob = opp.get("prob_itm_pct")
+            print(
+                f"{opp['ticker']:<10} {opp['underlying']:<6} "
+                f"{_format_number(opp.get('score_total'), digits=2):>6} "
+                f"{_format_number(prob, digits=1):>7} "
+                f"{_format_number(opp.get('extrinsic_pct_spot'), digits=1):>7} "
+                f"{_format_number(opp.get('%_Alta_p_2x'), digits=1):>8} "
+                f"{_format_number(opp.get('custo_pct'), digits=1):>8} "
+                f"{(opp.get('dias_uteis') or '-'):>5}"
+            )
+    print("\nTop Loterias (até 5):")
+    if not data.lottery_opportunities:
+        print("  Nenhuma dentro do filtro.")
+    else:
+        header = f"{'Ticker':<10} {'Und':<6} {'Score':>6} {'Prob%':>7} {'Extr%':>7} {'%2x':>8} {'Custo%':>8} {'Dias':>5}"
+        print(header)
+        print("-" * len(header))
+        for opp in data.lottery_opportunities:
+            prob = opp.get("prob_itm_pct")
+            print(
+                f"{opp['ticker']:<10} {opp['underlying']:<6} "
+                f"{_format_number(opp.get('score_total'), digits=2):>6} "
+                f"{_format_number(prob, digits=1):>7} "
+                f"{_format_number(opp.get('extrinsic_pct_spot'), digits=1):>7} "
+                f"{_format_number(opp.get('%_Alta_p_2x'), digits=1):>8} "
+                f"{_format_number(opp.get('custo_pct'), digits=1):>8} "
+                f"{(opp.get('dias_uteis') or '-'):>5}"
+            )
     print("\nPosições abertas:")
     positions = data.positions
     if not positions:

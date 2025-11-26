@@ -5,6 +5,7 @@ Este projeto automatiza a coleta diária de opções no site `https://opcoes.net
 - Vencimentos: 8 mais próximos
 - Strike: faixa completa (min–max)
 - Modalidade: Europeias (Mod = E)
+- CSVs saem com delimitador `;` (compatível com locale pt-BR) e números normalizados usando vírgula decimal.
 
 Os resultados são salvos em CSV, sem duplicar tickers já coletados.
 

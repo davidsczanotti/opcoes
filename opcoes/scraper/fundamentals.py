@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import csv
 import re
 from pathlib import Path
 from typing import Dict, Optional, Tuple
+
+from .storage import _csv_reader
 
 
 def _parse_float(value: object) -> Optional[float]:
@@ -69,7 +70,7 @@ def load_earnings_yield_map(path: Path) -> Dict[str, Tuple[Optional[float], Opti
     result: Dict[str, Tuple[Optional[float], Optional[float]]] = {}
 
     with path.open("r", newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
+        reader, _ = _csv_reader(f)
         for row in reader:
             # Mapeamento flexível de colunas
             norm = { _norm_key(k): v for k, v in row.items() }
@@ -110,4 +111,3 @@ def load_earnings_yield_map(path: Path) -> Dict[str, Tuple[Optional[float], Opti
 
 
 __all__ = ["load_earnings_yield_map"]
-
