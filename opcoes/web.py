@@ -67,11 +67,14 @@ def create_app() -> Flask:
 
     @app.route("/covered-call")
     def covered_call() -> str:
+        # Filtros padrão para a estratégia:
+        # - prêmio extrínseco >= 2% sobre o spot
+        # - vencimentos a partir de ~30 dias (até 200 por padrão, ajustável)
+        # - strike ao menos 1% acima do spot (dist_perc_strike >= 1)
         min_extrinsic = float(request.args.get("min_extrinsic", 2.0) or 0.0)
-        # Por padrão focamos na janela alvo de 30–45 dias,
-        # mas deixamos configurável via query string.
         min_days = _get_int_arg("min_days", 30)
-        max_days = _get_int_arg("max_days", 45)
+        max_days = _get_int_arg("max_days", 200)
+        min_dist_strike = float(request.args.get("min_dist_strike", 1.0) or 0.0)
 
         positions_open = list_positions(include_closed=False)
         positions_real = [p for p in positions_open if not p.get("is_simulated")]
@@ -85,6 +88,7 @@ def create_app() -> Flask:
             min_extrinsic=min_extrinsic,
             min_days=min_days,
             max_days=max_days,
+            min_dist_strike=min_dist_strike,
         )
 
         return render_template(
@@ -434,6 +438,7 @@ def create_app() -> Flask:
         min_extrinsic: float,
         min_days: int,
         max_days: int,
+        min_dist_strike: float,
     ) -> list[dict]:
         if not db_path.exists():
             return []
@@ -482,6 +487,10 @@ def create_app() -> Flask:
                 continue
             extrinsic = _parse_float(r["extrinsic_pct_spot"])
             if extrinsic is None or extrinsic < min_extrinsic:
+                continue
+            dist = _parse_float(r["dist_perc_strike"])
+            # dist_perc_strike é a distância do strike ao spot em %, positiva = OTM
+            if dist is None or dist < min_dist_strike:
                 continue
             suggestion = {
                 "ticker": r["ticker"],

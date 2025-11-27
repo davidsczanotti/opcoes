@@ -427,8 +427,9 @@ async def _select_last_vencimentos(page: Page, total: int) -> None:
             if (!order.length) {
                 return [];
             }
-            const start = Math.max(order.length - total, 0);
-            return order.slice(start);
+            const n = Math.max(1, Math.min(total, order.length));
+            // Seleciona os vencimentos mais próximos (datas menores primeiro)
+            return order.slice(0, n);
         }
         """,
         total,
