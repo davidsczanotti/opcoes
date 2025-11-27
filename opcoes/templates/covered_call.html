@@ -140,6 +140,106 @@
         </div>
       {% endif %}
 
+      <h2 class="h5 mt-4">Resumo financeiro (real)</h2>
+      {% if not call_summary_real %}
+        <p class="text-muted small">Nenhuma call real para resumir.</p>
+      {% else %}
+        <div class="table-responsive mb-4">
+          <table class="table table-sm table-striped align-middle">
+            <thead class="table-light">
+              <tr>
+                <th>Ticker</th>
+                <th class="text-end">Qtd</th>
+                <th class="text-end">Strike</th>
+                <th class="text-end">Custo méd. {{ underlying }}</th>
+                <th class="text-end">Prêmio bruto</th>
+                <th class="text-end">Prêmio líquido (expira)</th>
+                <th class="text-end">P/L se expirar</th>
+                <th class="text-end">P/L% expira</th>
+                <th class="text-end">P/L se exercida</th>
+                <th class="text-end">P/L% exercida</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in call_summary_real %}
+                <tr>
+                  <td>{{ row.ticker }}</td>
+                  <td class="text-end">{{ row.qty }}</td>
+                  <td class="text-end">
+                    {% if row.strike is not none %}{{ "%.2f"|format(row.strike) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if row.avg_cost is not none %}{{ "%.2f"|format(row.avg_cost) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">{{ "%.2f"|format(row.premium_bruto) }}</td>
+                  <td class="text-end">{{ "%.2f"|format(row.premio_liq) }}</td>
+                  <td class="text-end">{{ "%.2f"|format(row.pl_expira) }}</td>
+                  <td class="text-end">
+                    {% if row.pl_expira_pct is not none %}{{ "%.2f"|format(row.pl_expira_pct) }}%{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if row.pl_exercicio is not none %}{{ "%.2f"|format(row.pl_exercicio) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if row.pl_exercicio_pct is not none %}{{ "%.2f"|format(row.pl_exercicio_pct) }}%{% else %}-{% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+
+      <h2 class="h5 mt-4">Resumo financeiro (simulado)</h2>
+      {% if not call_summary_sim %}
+        <p class="text-muted small">Nenhuma call simulada para resumir.</p>
+      {% else %}
+        <div class="table-responsive mb-4">
+          <table class="table table-sm table-striped align-middle">
+            <thead class="table-light">
+              <tr>
+                <th>Ticker</th>
+                <th class="text-end">Qtd</th>
+                <th class="text-end">Strike</th>
+                <th class="text-end">Custo méd. {{ underlying }}</th>
+                <th class="text-end">Prêmio bruto</th>
+                <th class="text-end">Prêmio líquido (expira)</th>
+                <th class="text-end">P/L se expirar</th>
+                <th class="text-end">P/L% expira</th>
+                <th class="text-end">P/L se exercida</th>
+                <th class="text-end">P/L% exercida</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in call_summary_sim %}
+                <tr>
+                  <td>{{ row.ticker }}</td>
+                  <td class="text-end">{{ row.qty }}</td>
+                  <td class="text-end">
+                    {% if row.strike is not none %}{{ "%.2f"|format(row.strike) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if row.avg_cost is not none %}{{ "%.2f"|format(row.avg_cost) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">{{ "%.2f"|format(row.premium_bruto) }}</td>
+                  <td class="text-end">{{ "%.2f"|format(row.premio_liq) }}</td>
+                  <td class="text-end">{{ "%.2f"|format(row.pl_expira) }}</td>
+                  <td class="text-end">
+                    {% if row.pl_expira_pct is not none %}{{ "%.2f"|format(row.pl_expira_pct) }}%{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if row.pl_exercicio is not none %}{{ "%.2f"|format(row.pl_exercicio) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if row.pl_exercicio_pct is not none %}{{ "%.2f"|format(row.pl_exercicio_pct) }}%{% else %}-{% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+
       <h2 class="h5 mt-4">Lotes de {{ underlying }} (simulado)</h2>
       {% if not lots_sim %}
         <p class="text-muted small">Nenhum lote de {{ underlying }} simulado cadastrado.</p>

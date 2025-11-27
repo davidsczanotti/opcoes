@@ -85,6 +85,9 @@ def create_app() -> Flask:
         stock_real, lots_real, covered_real = _bova_coverage(positions_real, underlying)
         stock_sim, lots_sim, covered_sim = _bova_coverage(positions_simulated, underlying)
 
+        call_summary_real = _call_cashflow_summaries(covered_real, lots_real)
+        call_summary_sim = _call_cashflow_summaries(covered_sim, lots_sim)
+
         suggestions = _fetch_bova_suggestions(
             db_path=Path("data/opcoes_snapshots.db"),
             underlying=underlying,
@@ -103,6 +106,8 @@ def create_app() -> Flask:
             covered_sim=covered_sim,
             lots_real=lots_real,
             lots_sim=lots_sim,
+            call_summary_real=call_summary_real,
+            call_summary_sim=call_summary_sim,
             suggestions=suggestions,
         )
 
@@ -144,6 +149,8 @@ def create_app() -> Flask:
             fees = _parse_form_float(fees_input)
         else:
             fees = _auto_fees(ticker=ticker, underlying=underlying or ticker, qty=qty, entry_price=entry_price)
+        parent_raw = form.get("parent_position_id")
+        parent_id = int(parent_raw) if parent_raw and parent_raw.strip() else None
         add_position(
             ticker=ticker,
             underlying=underlying,
@@ -155,6 +162,7 @@ def create_app() -> Flask:
             irrf=float(form["irrf"]) if form.get("irrf") else None,
             notes=form.get("notes") or None,
             is_simulated=is_simulated,
+            parent_position_id=parent_id,
         )
         return redirect(url_for("positions"))
 
@@ -165,6 +173,12 @@ def create_app() -> Flask:
         is_simulated = None
         if form.get("is_simulated") is not None:
             is_simulated = form.get("is_simulated") == "1"
+        parent_id = None
+        if form.get("parent_position_id"):
+            try:
+                parent_id = int(form.get("parent_position_id"))
+            except ValueError:
+                parent_id = None
         update_position(
             position_id=position_id,
             trade_date=form.get("trade_date") or None,
@@ -182,6 +196,7 @@ def create_app() -> Flask:
             partial_qty=int(form["partial_qty"]) if form.get("partial_qty") else None,
             exit_reason=form.get("exit_reason") or None,
             is_simulated=is_simulated,
+            parent_position_id=parent_id,
         )
         return redirect(url_for("positions"))
 
@@ -388,25 +403,31 @@ def create_app() -> Flask:
                 }
             )
 
+        # Mapa auxiliar por id para lookup rápido durante a alocação.
+        lot_by_id = {int(l["id"]): l for l in lot_infos if l.get("id") is not None}
+
         # Alocação FIFO: assumimos 1:1 entre opções e ações
-        lot_index = 0
         for call in call_positions:
             open_contracts = int(call.get("open_qty") or call.get("qty") or 0)
-            # Interpretamos qty como quantidade de opções e usamos 1:1
-            # com ações do underlying para cobertura.
             need = open_contracts
-            while need > 0 and lot_index < len(lot_infos):
-                lot = lot_infos[lot_index]
-                available = max(lot["open_qty"] - lot["covered"], 0)
-                if available <= 0:
-                    lot_index += 1
-                    continue
-                alloc = min(available, need)
-                lot["covered"] += alloc
-                lot["free"] = max(lot["open_qty"] - lot["covered"], 0)
-                need -= alloc
-                if lot["free"] <= 0:
-                    lot_index += 1
+            if need <= 0:
+                continue
+            parent_id = call.get("parent_position_id")
+            lot = None
+            if parent_id is not None:
+                try:
+                    lot = lot_by_id.get(int(parent_id))
+                except (TypeError, ValueError):
+                    lot = None
+            if lot is None:
+                # sem vínculo explícito: não aloca coberturas neste helper
+                continue
+            available = max(lot["open_qty"] - lot["covered"], 0)
+            if available <= 0:
+                continue
+            alloc = min(available, need)
+            lot["covered"] += alloc
+            lot["free"] = max(lot["open_qty"] - lot["covered"], 0)
 
         # Resumo agregado
         shares_total = sum(l["open_qty"] for l in lot_infos)
@@ -439,6 +460,96 @@ def create_app() -> Flask:
         }
 
         return stock_summary, lot_infos, call_positions
+
+    def _call_cashflow_summaries(
+        call_positions: list[dict],
+        lots: list[dict],
+    ) -> list[dict]:
+        """Monta resumo financeiro por call (prêmio e cenário com exercício).
+
+        Aproxima IR da seguinte forma:
+        - opções: 15% sobre lucro do prêmio (swing) ou 20% (day trade);
+        - ação: 15% sobre lucro do papel (desconsidera isenções).
+        """
+
+        total_shares = sum(l.get("open_qty") or 0 for l in lots)
+        avg_cost_global = None
+        if total_shares > 0:
+            cost_sum = sum((l.get("open_qty") or 0) * (l.get("entry_price") or 0.0) for l in lots)
+            if cost_sum:
+                avg_cost_global = cost_sum / total_shares
+
+        lot_by_id = {int(l["id"]): l for l in lots if l.get("id") is not None}
+
+        summaries: list[dict] = []
+        for pos in call_positions:
+            qty = int(pos.get("qty") or 0)
+            if qty <= 0:
+                continue
+            trade_type = (pos.get("trade_type") or "swing").strip().lower()
+            aliquota_opts = 0.20 if "day" in trade_type else 0.15
+            aliquota_acao = 0.15
+            price_call = float(pos.get("entry_price") or 0.0)
+            fees = float(pos.get("fees") or 0.0)
+            strike = pos.get("strike")
+
+            parent_id = pos.get("parent_position_id")
+            local_avg_cost = avg_cost_global
+            if parent_id is not None:
+                try:
+                    lot = lot_by_id.get(int(parent_id))
+                except (TypeError, ValueError):
+                    lot = None
+                if lot is not None:
+                    local_avg_cost = float(lot.get("entry_price") or 0.0)
+
+            premium_bruto = price_call * qty
+            # IR estimado sobre o prêmio
+            base_premio = max(0.0, premium_bruto - fees)
+            ir_premio = base_premio * aliquota_opts
+            premio_liq = premium_bruto - fees - ir_premio
+
+            pl_expira = premio_liq
+            pl_expira_pct = None
+
+            pl_exercicio = None
+            avg_cost = local_avg_cost
+            pl_exercicio_pct = None
+            if local_avg_cost is not None and strike is not None:
+                try:
+                    strike_val = float(strike)
+                except (TypeError, ValueError):
+                    strike_val = None
+                if strike_val is not None:
+                    ganho_papel = (strike_val - local_avg_cost) * qty
+                    # IR sobre ação e sobre prêmio calculados separadamente
+                    ir_papel = max(0.0, ganho_papel) * aliquota_acao
+                    ganho_bruto_total = premium_bruto + ganho_papel
+                    pl_exercicio = ganho_bruto_total - fees - ir_premio - ir_papel
+
+            capital = None
+            if local_avg_cost is not None and qty > 0:
+                capital = local_avg_cost * qty
+            if capital and pl_expira is not None:
+                pl_expira_pct = (pl_expira / capital) * 100.0
+            if capital and pl_exercicio is not None:
+                pl_exercicio_pct = (pl_exercicio / capital) * 100.0
+
+            summaries.append(
+                {
+                    "ticker": pos.get("ticker"),
+                    "qty": qty,
+                    "strike": strike,
+                    "avg_cost": avg_cost,
+                    "premium_bruto": premium_bruto,
+                    "premio_liq": premio_liq,
+                    "pl_expira": pl_expira,
+                    "pl_exercicio": pl_exercicio,
+                    "pl_expira_pct": pl_expira_pct,
+                    "pl_exercicio_pct": pl_exercicio_pct,
+                }
+            )
+        return summaries
 
     def _fetch_bova_suggestions(
         *,
@@ -515,7 +626,14 @@ def create_app() -> Flask:
             }
             suggestions.append(suggestion)
 
-        suggestions.sort(key=lambda s: (-(s.get("extrinsic_pct_spot") or 0.0), s.get("dist_perc_strike") or 0.0))
+        # Ordena por prazo crescente (dias úteis) e, dentro do mesmo vencimento,
+        # prioriza maior prêmio extrínseco.
+        suggestions.sort(
+            key=lambda s: (
+                s.get("dias_uteis") or 0,
+                -(s.get("extrinsic_pct_spot") or 0.0),
+            )
+        )
         return suggestions
 
     return app

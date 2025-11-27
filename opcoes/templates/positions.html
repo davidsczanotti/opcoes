@@ -68,6 +68,10 @@
               </select>
             </div>
             <div class="col-md-2">
+              <label class="form-label small">Lote pai (ID)</label>
+              <input name="parent_position_id" type="number" min="1" class="form-control form-control-sm" placeholder="opcional">
+            </div>
+            <div class="col-md-2">
               <label class="form-label small">IRRF</label>
               <input name="irrf" type="number" step="0.01" class="form-control form-control-sm" placeholder="opcional">
             </div>
@@ -94,6 +98,7 @@
                 <th>Ativo</th>
                 <th>Status</th>
                 <th>Tipo</th>
+                <th>Lote pai</th>
                 <th>Simulado?</th>
                 <th>Data</th>
                 <th>Venc.</th>
@@ -129,6 +134,9 @@
                         <option value="swing" {% if pos.trade_type == 'swing' %}selected{% endif %}>swing</option>
                         <option value="daytrade" {% if pos.trade_type == 'daytrade' %}selected{% endif %}>day trade</option>
                       </select>
+                    </td>
+                    <td style="min-width: 70px;">
+                      <input name="parent_position_id" type="number" min="1" class="form-control form-control-sm text-end" value="{{ pos.parent_position_id or '' }}">
                     </td>
                     <td style="min-width: 110px;">
                       <select name="is_simulated" class="form-select form-select-sm">

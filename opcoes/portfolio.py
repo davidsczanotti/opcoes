@@ -61,6 +61,7 @@ def _ensure_position_columns(conn: sqlite3.Connection) -> None:
         "trade_type": "TEXT",
         "irrf": "REAL",
         "is_simulated": "INTEGER DEFAULT 0",
+        "parent_position_id": "INTEGER",
     }
     for col, col_type in columns.items():
         if col not in existing:
@@ -88,13 +89,14 @@ def add_position(
     partial_qty: Optional[int] = None,
     exit_reason: Optional[str] = None,
     is_simulated: bool = False,
+    parent_position_id: Optional[int] = None,
 ) -> int:
     conn = _connect()
     cursor = conn.cursor()
     cursor.execute(
         """
-        INSERT INTO positions (ticker, underlying, trade_date, qty, entry_price, fees, trade_type, irrf, notes, partial_date, partial_price, partial_qty, exit_reason, is_simulated)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO positions (ticker, underlying, trade_date, qty, entry_price, fees, trade_type, irrf, notes, partial_date, partial_price, partial_qty, exit_reason, is_simulated, parent_position_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             _normalize_ticker(ticker),
@@ -111,6 +113,7 @@ def add_position(
             int(partial_qty) if partial_qty is not None else None,
             exit_reason,
             1 if is_simulated else 0,
+            int(parent_position_id) if parent_position_id is not None else None,
         ),
     )
     conn.commit()
@@ -157,6 +160,7 @@ def update_position(
     trade_type: Optional[str] = None,
     irrf: Optional[float] = None,
     is_simulated: Optional[bool] = None,
+    parent_position_id: Optional[int] = None,
 ) -> None:
     fields = []
     params = []
@@ -205,6 +209,9 @@ def update_position(
     if is_simulated is not None:
         fields.append("is_simulated = ?")
         params.append(1 if is_simulated else 0)
+    if parent_position_id is not None:
+        fields.append("parent_position_id = ?")
+        params.append(int(parent_position_id))
     if not fields:
         return
 
@@ -255,7 +262,8 @@ def list_positions(
             snap."dias_uteis" AS last_dias_uteis,
             snap."underlying_price" AS last_underlying_price,
             snap."extrinsic_pct_spot" AS last_extrinsic_pct_spot,
-            snap."%_Alta_p_2x" AS last_pct_2x
+            snap."%_Alta_p_2x" AS last_pct_2x,
+            snap."strike" AS last_strike
         FROM positions p
         LEFT JOIN (
             SELECT os1.*
@@ -342,12 +350,15 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     underlying_price = None
     extrinsic_pct_spot = None
     pct_2x = None
+    last_strike = None
     if "last_underlying_price" in row.keys():
         underlying_price = parse_decimal(row["last_underlying_price"])
     if "last_extrinsic_pct_spot" in row.keys():
         extrinsic_pct_spot = parse_decimal(row["last_extrinsic_pct_spot"])
     if "last_pct_2x" in row.keys():
         pct_2x = parse_decimal(row["last_pct_2x"])
+    if "last_strike" in row.keys():
+        last_strike = parse_decimal(row["last_strike"])
 
     return {
         "id": row["id"],
@@ -377,9 +388,11 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
         "trade_type": row["trade_type"],
         "irrf": row["irrf"],
         "is_simulated": bool(is_sim_raw),
+        "parent_position_id": row["parent_position_id"] if "parent_position_id" in row.keys() else None,
         "underlying_price": underlying_price,
         "extrinsic_pct_spot": extrinsic_pct_spot,
         "pct_2x": pct_2x,
+        "strike": last_strike,
     }
 
 

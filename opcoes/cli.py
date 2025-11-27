@@ -163,6 +163,12 @@ def parse_args() -> argparse.Namespace:
     pa.add_argument("--fees", type=float, default=0.0, help="Custos/Taxas adicionais (opcional)")
     pa.add_argument("--notes", default=None, help="Observações (opcional)")
     pa.add_argument(
+        "--parent-id",
+        type=int,
+        default=None,
+        help="ID da posição de underlying associada (lote pai, opcional).",
+    )
+    pa.add_argument(
         "--simulated",
         action="store_true",
         help="Marca a posição como aporte simulado/fictício (não real).",
@@ -275,6 +281,7 @@ def main() -> None:
                 fees=args.fees,
                 notes=args.notes,
                 is_simulated=bool(getattr(args, "simulated", False)),
+                parent_position_id=getattr(args, "parent_id", None),
             )
             print(f"Posição registrada com ID {pos_id}.")
         elif args.subcmd == "list":
