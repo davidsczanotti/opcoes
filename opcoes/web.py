@@ -7,6 +7,8 @@ from flask import Flask, redirect, render_template, request, url_for
 
 from .report import generate_report
 from .portfolio import list_positions, add_position, update_position, delete_position
+from .scraper.storage import _parse_ptbr_number
+from .settings import FeeSettings, get_fee_settings, update_fee_settings
 
 
 def create_app() -> Flask:
@@ -40,7 +42,10 @@ def create_app() -> Flask:
                 continue
             alerts_map[pos.get("id")] = alert.get("reasons", [])
 
-        totals = _compute_totals(data.positions)
+        positions_real = [p for p in data.positions if not p.get("is_simulated")]
+        positions_simulated = [p for p in data.positions if p.get("is_simulated")]
+        totals_real = _compute_totals(positions_real)
+        totals_simulated = _compute_totals(positions_simulated)
         all_opps = list(data.opportunities) + list(data.theoretical_opportunities)
         segments = _segment_opportunities(all_opps)
 
@@ -53,10 +58,64 @@ def create_app() -> Flask:
             recurring_limit=recurring_limit,
             underlying_filter=underlying_filter,
             alerts_map=alerts_map,
-            totals=totals,
+            totals_real=totals_real,
+            totals_simulated=totals_simulated,
+            positions_real=positions_real,
+            positions_simulated=positions_simulated,
             segments=segments,
         )
 
+    @app.route("/covered-call")
+    def covered_call() -> str:
+        min_extrinsic = float(request.args.get("min_extrinsic", 2.0) or 0.0)
+        # Por padrão focamos na janela alvo de 30–45 dias,
+        # mas deixamos configurável via query string.
+        min_days = _get_int_arg("min_days", 30)
+        max_days = _get_int_arg("max_days", 45)
+
+        positions_open = list_positions(include_closed=False)
+        positions_real = [p for p in positions_open if not p.get("is_simulated")]
+        positions_simulated = [p for p in positions_open if p.get("is_simulated")]
+
+        stock_real, lots_real, covered_real = _bova_coverage(positions_real)
+        stock_sim, lots_sim, covered_sim = _bova_coverage(positions_simulated)
+
+        suggestions = _fetch_bova_suggestions(
+            db_path=Path("data/opcoes_snapshots.db"),
+            min_extrinsic=min_extrinsic,
+            min_days=min_days,
+            max_days=max_days,
+        )
+
+        return render_template(
+            "covered_call.html",
+            stock_real=stock_real,
+            stock_sim=stock_sim,
+            covered_real=covered_real,
+            covered_sim=covered_sim,
+            lots_real=lots_real,
+            lots_sim=lots_sim,
+            suggestions=suggestions,
+        )
+
+    @app.route("/settings", methods=["GET", "POST"])
+    def settings_view() -> str:
+        if request.method == "POST":
+            form = request.form
+            equity_fixed = _parse_form_float(form.get("equity_fixed"))
+            equity_percent = _parse_form_float(form.get("equity_percent"))
+            option_fixed = _parse_form_float(form.get("option_fixed"))
+            option_percent_notional = _parse_form_float(form.get("option_percent_notional"))
+            update_fee_settings(
+                equity_fixed=equity_fixed,
+                equity_percent=equity_percent,
+                option_fixed=option_fixed,
+                option_percent_notional=option_percent_notional,
+            )
+            return redirect(url_for("settings_view"))
+
+        fees_cfg: FeeSettings = get_fee_settings()
+        return render_template("settings.html", fees=fees_cfg)
     @app.route("/positions")
     def positions() -> str:
         positions = list_positions(include_closed=True)
@@ -67,18 +126,27 @@ def create_app() -> Flask:
         form = request.form
         underlying = form.get("underlying", "").strip()
         ticker = form.get("ticker", "").strip()
+        is_simulated = form.get("is_simulated") == "1"
         if not underlying:
             underlying = _lookup_underlying_from_snapshot(ticker) or ""
+        qty = int(form.get("qty", 0) or 0)
+        entry_price = _parse_form_float(form.get("entry_price"))
+        fees_input = form.get("fees")
+        if fees_input:
+            fees = _parse_form_float(fees_input)
+        else:
+            fees = _auto_fees(ticker=ticker, underlying=underlying or ticker, qty=qty, entry_price=entry_price)
         add_position(
             ticker=ticker,
             underlying=underlying,
             trade_date=form.get("trade_date", ""),
-            qty=int(form.get("qty", 0)),
-            entry_price=float(form.get("entry_price", 0.0)),
-            fees=float(form.get("fees", 0.0) or 0.0),
+            qty=qty,
+            entry_price=entry_price,
+            fees=fees,
             trade_type=form.get("trade_type", "swing"),
             irrf=float(form["irrf"]) if form.get("irrf") else None,
             notes=form.get("notes") or None,
+            is_simulated=is_simulated,
         )
         return redirect(url_for("positions"))
 
@@ -86,6 +154,9 @@ def create_app() -> Flask:
     def update_position_view(position_id: int):
         form = request.form
         status = form.get("status") or None
+        is_simulated = None
+        if form.get("is_simulated") is not None:
+            is_simulated = form.get("is_simulated") == "1"
         update_position(
             position_id=position_id,
             trade_date=form.get("trade_date") or None,
@@ -102,6 +173,7 @@ def create_app() -> Flask:
             partial_price=float(form["partial_price"]) if form.get("partial_price") else None,
             partial_qty=int(form["partial_qty"]) if form.get("partial_qty") else None,
             exit_reason=form.get("exit_reason") or None,
+            is_simulated=is_simulated,
         )
         return redirect(url_for("positions"))
 
@@ -115,6 +187,17 @@ def create_app() -> Flask:
             return int(request.args.get(name, default))
         except (TypeError, ValueError):
             return default
+
+    def _parse_form_float(value: str | None) -> float:
+        if not value:
+            return 0.0
+        text = value.strip().replace("%", "").replace(",", ".")
+        if not text:
+            return 0.0
+        try:
+            return float(text)
+        except ValueError:
+            return 0.0
 
     def _lookup_underlying_from_snapshot(ticker: str) -> str | None:
         if not ticker:
@@ -132,6 +215,73 @@ def create_app() -> Flask:
             return row[0] if row else None
         finally:
             conn.close()
+
+    def _lookup_option_strike(ticker: str) -> float | None:
+        """Recupera o strike do ticker de opção a partir do último snapshot."""
+
+        if not ticker:
+            return None
+        t = ticker.strip().upper()
+        db_path = Path("data/opcoes_snapshots.db")
+        if not db_path.exists():
+            return None
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(
+                """
+                SELECT strike
+                FROM option_snapshots
+                WHERE ticker = ?
+                ORDER BY snapshot_date DESC
+                LIMIT 1
+                """,
+                (t,),
+            ).fetchone()
+            if not row:
+                return None
+            return float(_parse_ptbr_number(row["strike"]) or 0.0)
+        finally:
+            conn.close()
+
+    def _auto_fees(
+        *,
+        ticker: str,
+        underlying: str,
+        qty: int,
+        entry_price: float,
+    ) -> float:
+        """Calcula taxas padrão a partir das configurações, se possível."""
+
+        fees_cfg: FeeSettings = get_fee_settings()
+        t = (ticker or "").strip().upper()
+        u = (underlying or "").strip().upper()
+        qty = max(int(qty or 0), 0)
+        entry_price = float(entry_price or 0.0)
+
+        if not t or qty <= 0 or entry_price <= 0:
+            return 0.0
+
+        # Se ticker == underlying, tratamos como ação/ETF.
+        if u and t == u:
+            value = entry_price * qty
+            return max(
+                0.0,
+                float(fees_cfg.equity_fixed)
+                + (float(fees_cfg.equity_percent) / 100.0) * value,
+            )
+
+        # Caso contrário, usamos regra de opções (strike * 100 * contratos).
+        strike = _lookup_option_strike(t)
+        if not strike or strike <= 0:
+            # Sem strike conhecido, pelo menos aplicamos a parte fixa.
+            return max(0.0, float(fees_cfg.option_fixed))
+        notional = strike * 100.0 * qty
+        return max(
+            0.0,
+            float(fees_cfg.option_fixed)
+            + (float(fees_cfg.option_percent_notional) / 100.0) * notional,
+        )
 
     def _compute_totals(positions: list[dict]) -> dict:
         total_purchase = 0.0
@@ -182,6 +332,173 @@ def create_app() -> Flask:
                 continue
             segments["aposta"].append(o)
         return segments
+
+    def _bova_coverage(positions: list[dict]) -> tuple[dict, list[dict], list[dict]]:
+        """Calcula alocação de BOVA11 -> calls via FIFO, por grupo (real/simulado).
+
+        Retorna:
+        - resumo de estoque (shares_total/cobertas/livres + min/máx/média dos livres)
+        - lista de lotes de BOVA11 com qtd total, coberta e livre
+        - lista de calls de BOVA11 em aberto (para conveniência do template)
+        """
+
+        # Lotes de BOVA11 (ticker == BOVA11)
+        bova_lots = [
+            p
+            for p in positions
+            if (p.get("ticker") or "").upper() == "BOVA11"
+        ]
+        # Calls de BOVA11 (underlying == BOVA11, ticker != BOVA11)
+        call_positions = [
+            p
+            for p in positions
+            if (p.get("underlying") or "").upper() == "BOVA11" and (p.get("ticker") or "").upper() != "BOVA11"
+        ]
+
+        # Ordena lotes e calls por data (FIFO)
+        def _key_date(pos: dict) -> str:
+            return str(pos.get("trade_date") or "")
+
+        bova_lots = sorted(bova_lots, key=_key_date)
+        call_positions = sorted(call_positions, key=_key_date)
+
+        # Inicializa cobertura por lote
+        lot_infos: list[dict] = []
+        for p in bova_lots:
+            open_qty = int(p.get("open_qty") or p.get("qty") or 0)
+            lot_infos.append(
+                {
+                    "id": p["id"],
+                    "trade_date": p.get("trade_date"),
+                    "qty_total": int(p.get("qty") or 0),
+                    "open_qty": open_qty,
+                    "covered": 0,
+                    "free": open_qty,
+                    "entry_price": float(p.get("entry_price") or 0.0),
+                }
+            )
+
+        # Alocação FIFO: cada contrato consome 100 BOVA11
+        lot_index = 0
+        for call in call_positions:
+            open_contracts = int(call.get("open_qty") or call.get("qty") or 0)
+            need = open_contracts * 100
+            while need > 0 and lot_index < len(lot_infos):
+                lot = lot_infos[lot_index]
+                available = max(lot["open_qty"] - lot["covered"], 0)
+                if available <= 0:
+                    lot_index += 1
+                    continue
+                alloc = min(available, need)
+                lot["covered"] += alloc
+                lot["free"] = max(lot["open_qty"] - lot["covered"], 0)
+                need -= alloc
+                if lot["free"] <= 0:
+                    lot_index += 1
+
+        # Resumo agregado
+        shares_total = sum(l["open_qty"] for l in lot_infos)
+        shares_covered = sum(l["covered"] for l in lot_infos)
+        shares_free = sum(l["free"] for l in lot_infos)
+
+        free_min = None
+        free_max = None
+        free_sum = 0.0
+        if shares_free > 0:
+            for l in lot_infos:
+                f = l["free"]
+                if f <= 0:
+                    continue
+                price = l["entry_price"]
+                free_sum += price * f
+                if free_min is None or price < free_min:
+                    free_min = price
+                if free_max is None or price > free_max:
+                    free_max = price
+        free_avg = (free_sum / shares_free) if shares_free > 0 else None
+
+        stock_summary = {
+            "shares_total": int(shares_total),
+            "shares_covered": int(shares_covered),
+            "shares_free": int(shares_free),
+            "free_min_price": free_min,
+            "free_max_price": free_max,
+            "free_avg_price": free_avg,
+        }
+
+        return stock_summary, lot_infos, call_positions
+
+    def _fetch_bova_suggestions(
+        *,
+        db_path: Path,
+        min_extrinsic: float,
+        min_days: int,
+        max_days: int,
+    ) -> list[dict]:
+        if not db_path.exists():
+            return []
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute("SELECT MAX(snapshot_date) AS d FROM option_snapshots").fetchone()
+            snapshot_date = row["d"] if row else None
+            if not snapshot_date:
+                return []
+            rows = conn.execute(
+                """
+                SELECT
+                    ticker,
+                    underlying,
+                    vencimento,
+                    dias_uteis,
+                    strike,
+                    dist_perc_strike,
+                    underlying_price,
+                    extrinsic_pct_spot,
+                    "%_Alta_p_2x" AS pct_2x,
+                    score_total
+                FROM option_snapshots
+                WHERE snapshot_date = ?
+                  AND UPPER(underlying) = 'BOVA11'
+                  AND dias_uteis IS NOT NULL
+                """,
+                (snapshot_date,),
+            ).fetchall()
+        finally:
+            conn.close()
+
+        def _parse_float(value) -> float | None:
+            try:
+                return float(_parse_ptbr_number(value))
+            except Exception:
+                return None
+
+        suggestions: list[dict] = []
+        for r in rows:
+            dias_uteis = _parse_float(r["dias_uteis"])
+            if dias_uteis is None:
+                continue
+            if dias_uteis < min_days or dias_uteis > max_days:
+                continue
+            extrinsic = _parse_float(r["extrinsic_pct_spot"])
+            if extrinsic is None or extrinsic < min_extrinsic:
+                continue
+            suggestion = {
+                "ticker": r["ticker"],
+                "underlying": r["underlying"],
+                "vencimento": r["vencimento"],
+                "dias_uteis": int(dias_uteis),
+                "strike": _parse_float(r["strike"]),
+                "dist_perc_strike": _parse_float(r["dist_perc_strike"]),
+                "underlying_price": _parse_float(r["underlying_price"]),
+                "extrinsic_pct_spot": extrinsic,
+                "pct_2x": _parse_float(r["pct_2x"]),
+                "score_total": _parse_float(r["score_total"]),
+            }
+            suggestions.append(suggestion)
+
+        suggestions.sort(key=lambda s: (-(s.get("extrinsic_pct_spot") or 0.0), s.get("dist_perc_strike") or 0.0))
+        return suggestions
 
     return app
 

@@ -16,6 +16,8 @@
         <div class="navbar-nav">
           <a class="nav-link active" href="/">Ranking</a>
           <a class="nav-link" href="/positions">Posições</a>
+          <a class="nav-link" href="/covered-call">Covered Call</a>
+          <a class="nav-link" href="/settings">Configurações</a>
         </div>
       </div>
     </nav>
@@ -503,16 +505,16 @@
         {% endif %}
       {% endfor %}
 
-      <h2 class="h5 mt-4">Posições abertas</h2>
-      {% if not data.positions %}
-        <p>Nenhuma posição aberta.</p>
+      <h2 class="h5 mt-4">Posições abertas real</h2>
+      {% if not positions_real %}
+        <p>Nenhuma posição aberta real.</p>
       {% else %}
         <div class="row mb-3">
           <div class="col-md-3">
             <div class="card">
               <div class="card-body">
                 <div class="text-muted small">Valor de compra</div>
-                <div class="fs-5">R$ {{ "%.2f"|format(totals.total_purchase) }}</div>
+                <div class="fs-5">R$ {{ "%.2f"|format(totals_real.total_purchase) }}</div>
               </div>
             </div>
           </div>
@@ -520,7 +522,7 @@
             <div class="card">
               <div class="card-body">
                 <div class="text-muted small">Valor atual (aberto + realizado)</div>
-                <div class="fs-5">R$ {{ "%.2f"|format(totals.total_current) }}</div>
+                <div class="fs-5">R$ {{ "%.2f"|format(totals_real.total_current) }}</div>
               </div>
             </div>
           </div>
@@ -528,7 +530,7 @@
             <div class="card">
               <div class="card-body">
                 <div class="text-muted small">P/L total</div>
-                <div class="fs-5">R$ {{ "%.2f"|format(totals.total_pl) }}</div>
+                <div class="fs-5">R$ {{ "%.2f"|format(totals_real.total_pl) }}</div>
               </div>
             </div>
           </div>
@@ -537,7 +539,7 @@
               <div class="card-body">
                 <div class="text-muted small">P/L%</div>
                 <div class="fs-5">
-                  {% if totals.total_pl_pct is not none %}{{ "%.2f"|format(totals.total_pl_pct) }}%{% else %}-{% endif %}
+                  {% if totals_real.total_pl_pct is not none %}{{ "%.2f"|format(totals_real.total_pl_pct) }}%{% else %}-{% endif %}
                 </div>
               </div>
             </div>
@@ -562,7 +564,102 @@
               </tr>
             </thead>
             <tbody>
-              {% for pos in data.positions %}
+              {% for pos in positions_real %}
+              {% set has_alert = alerts_map.get(pos.id) %}
+              <tr class="{% if has_alert %}table-warning{% endif %}">
+                <td>{{ pos.id }}</td>
+                <td>{{ pos.ticker }}</td>
+                <td>{{ pos.trade_date }}</td>
+                <td class="text-end">{{ pos.qty }}</td>
+                <td class="text-end">{{ "%.2f"|format(pos.entry_price) }}</td>
+                <td class="text-end">
+                  {% if pos.last_price is not none %}{{ "%.2f"|format(pos.last_price) }}{% else %}-{% endif %}
+                </td>
+                <td class="text-end">
+                  {% if pos.pl is not none %}{{ "%.2f"|format(pos.pl) }}{% else %}-{% endif %}
+                </td>
+                <td class="text-end">
+                  {% if pos.pl_pct is not none %}{{ "%.2f"|format(pos.pl_pct) }}%{% else %}-{% endif %}
+                </td>
+                <td class="text-end">
+                  {% if pos.breakeven_price is not none %}{{ "%.2f"|format(pos.breakeven_price) }}{% else %}-{% endif %}
+                </td>
+                <td class="text-end">{{ pos.score_total or '-' }}</td>
+                <td>{{ pos.trend_flag or '-' }}</td>
+                <td>
+                  {% if has_alert %}
+                    {% for r in has_alert %}
+                      <div class="small text-danger">{{ r }}</div>
+                    {% endfor %}
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+
+      <h2 class="h5 mt-4">Posições abertas fictício</h2>
+      {% if not positions_simulated %}
+        <p>Nenhuma posição aberta fictícia.</p>
+      {% else %}
+        <div class="row mb-3">
+          <div class="col-md-3">
+            <div class="card">
+              <div class="card-body">
+                <div class="text-muted small">Valor de compra</div>
+                <div class="fs-5">R$ {{ "%.2f"|format(totals_simulated.total_purchase) }}</div>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="card">
+              <div class="card-body">
+                <div class="text-muted small">Valor atual (aberto + realizado)</div>
+                <div class="fs-5">R$ {{ "%.2f"|format(totals_simulated.total_current) }}</div>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="card">
+              <div class="card-body">
+                <div class="text-muted small">P/L total</div>
+                <div class="fs-5">R$ {{ "%.2f"|format(totals_simulated.total_pl) }}</div>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="card">
+              <div class="card-body">
+                <div class="text-muted small">P/L%</div>
+                <div class="fs-5">
+                  {% if totals_simulated.total_pl_pct is not none %}{{ "%.2f"|format(totals_simulated.total_pl_pct) }}%{% else %}-{% endif %}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="table table-sm table-striped align-middle">
+            <thead class="table-light">
+              <tr>
+                <th>ID</th>
+                <th>Ticker</th>
+                <th>Data</th>
+                <th class="text-end">Qtd</th>
+                <th class="text-end">Preço</th>
+                <th class="text-end">Último</th>
+                <th class="text-end">P/L</th>
+                <th class="text-end">P/L%</th>
+                <th class="text-end">Breakeven</th>
+                <th class="text-end">Score</th>
+                <th>Trend</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for pos in positions_simulated %}
               {% set has_alert = alerts_map.get(pos.id) %}
               <tr class="{% if has_alert %}table-warning{% endif %}">
                 <td>{{ pos.id }}</td>

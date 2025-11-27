@@ -2,7 +2,7 @@ opcoes – Coletor diário de opções (CALLs Europeias)
 
 Este projeto automatiza a coleta diária de opções no site `https://opcoes.net.br/opcoes/bovespa` usando Playwright, aplicando filtros:
 - Tipo: CALLs
-- Vencimentos: 8 mais próximos
+- Vencimentos: até 16 mais próximos (cobrindo também janelas em torno de 30–45 dias)
 - Strike: faixa completa (min–max)
 - Modalidade: Europeias (Mod = E)
 - CSVs saem com delimitador `;` (compatível com locale pt-BR) e números normalizados usando vírgula decimal.

@@ -38,7 +38,10 @@ from .snapshots import SnapshotDB
 from .far_expirations import fetch_far_expiration_quotes
 
 
-MAX_VENCIMENTOS = 8
+# Número de vencimentos a selecionar no filtro da tela.
+# Valores maiores aumentam a cobertura de prazos (incluindo ~30–45 dias),
+# ao custo de mais linhas por papel.
+MAX_VENCIMENTOS = 16
 PROCESSING_OVERLAY = "#tblListaOpc_processing"
 
 
@@ -168,10 +171,27 @@ async def scrape_all(
                     r["pe_ttm"] = pe_str
             price_info = price_map.get(symbol)
             if price_info:
-                if site_price is not None:
-                    price_info.price = site_price
+                # Mescla preço do site apenas se ele for mais recente
+                # que o do Yahoo Finance (ou se não houver dado do Yahoo).
+                yf_date = None
+                site_date = None
+                if price_info.price_date:
+                    with contextlib.suppress(ValueError):
+                        yf_date = dt.date.fromisoformat(str(price_info.price_date))
                 if site_price_date:
-                    price_info.price_date = site_price_date
+                    with contextlib.suppress(ValueError):
+                        site_date = dt.date.fromisoformat(str(site_price_date))
+                use_site_price = False
+                if site_date and (yf_date is None or site_date >= yf_date):
+                    use_site_price = True
+                elif site_price is not None and price_info.price is None:
+                    # Sem data, mas temos preço e o Yahoo não retornou preço.
+                    use_site_price = True
+                if use_site_price:
+                    if site_price is not None:
+                        price_info.price = site_price
+                    if site_price_date:
+                        price_info.price_date = site_price_date
             elif site_price is not None or site_price_date:
                 price_info = PriceIndicators(
                     price=site_price,

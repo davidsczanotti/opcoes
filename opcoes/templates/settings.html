@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <title>Opções – Configurações</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    >
+  </head>
+  <body class="bg-light">
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
+      <div class="container-fluid">
+        <a class="navbar-brand" href="/">Opções</a>
+        <div class="navbar-nav">
+          <a class="nav-link" href="/">Ranking</a>
+          <a class="nav-link" href="/positions">Posições</a>
+          <a class="nav-link" href="/covered-call">Covered Call</a>
+          <a class="nav-link active" href="/settings">Configurações</a>
+        </div>
+      </div>
+    </nav>
+
+    <div class="container">
+      <h1 class="h4 mb-3">Configuração de taxas</h1>
+      <p class="text-muted small">
+        Estes valores são usados apenas quando o campo <strong>Taxas</strong> fica em branco ao cadastrar uma posição.
+        Você pode continuar informando as taxas manualmente quando preferir.
+      </p>
+
+      <form method="post" class="row gy-3">
+        <div class="col-12">
+          <h2 class="h6">Ações / ETFs (ex.: BOVA11)</h2>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label small">Taxa fixa por operação (R$)</label>
+          <input
+            name="equity_fixed"
+            class="form-control form-control-sm"
+            type="number"
+            step="0.01"
+            value="{{ '%.2f'|format(fees.equity_fixed) }}"
+          >
+        </div>
+        <div class="col-md-4">
+          <label class="form-label small">% sobre o valor da operação</label>
+          <div class="input-group input-group-sm">
+            <input
+              name="equity_percent"
+              class="form-control"
+              type="number"
+              step="0.01"
+              value="{{ '%.2f'|format(fees.equity_percent) }}"
+            >
+            <span class="input-group-text">%</span>
+          </div>
+          <small class="text-muted">Ex.: 0,50 para 0,5%.</small>
+        </div>
+
+        <div class="col-12 mt-3">
+          <h2 class="h6">Opções</h2>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label small">Taxa fixa por operação (R$)</label>
+          <input
+            name="option_fixed"
+            class="form-control form-control-sm"
+            type="number"
+            step="0.01"
+            value="{{ '%.2f'|format(fees.option_fixed) }}"
+          >
+          <small class="text-muted">Ex.: corretagem fixa (4,50).</small>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label small">% sobre notional (strike × 100 × contratos)</label>
+          <div class="input-group input-group-sm">
+            <input
+              name="option_percent_notional"
+              class="form-control"
+              type="number"
+              step="0.01"
+              value="{{ '%.2f'|format(fees.option_percent_notional) }}"
+            >
+            <span class="input-group-text">%</span>
+          </div>
+          <small class="text-muted">Ex.: 0,50 para 0,5%.</small>
+        </div>
+
+        <div class="col-12 mt-4">
+          <button type="submit" class="btn btn-primary btn-sm">Salvar</button>
+        </div>
+      </form>
+    </div>
+  </body>
+</html>
+

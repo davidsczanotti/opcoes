@@ -162,6 +162,11 @@ def parse_args() -> argparse.Namespace:
     pa.add_argument("--price", type=float, required=True, help="Preço pago por contrato")
     pa.add_argument("--fees", type=float, default=0.0, help="Custos/Taxas adicionais (opcional)")
     pa.add_argument("--notes", default=None, help="Observações (opcional)")
+    pa.add_argument(
+        "--simulated",
+        action="store_true",
+        help="Marca a posição como aporte simulado/fictício (não real).",
+    )
 
     pl = pcs.add_parser("list", help="Lista posições registradas")
     group = pl.add_mutually_exclusive_group()
@@ -269,6 +274,7 @@ def main() -> None:
                 entry_price=args.price,
                 fees=args.fees,
                 notes=args.notes,
+                is_simulated=bool(getattr(args, "simulated", False)),
             )
             print(f"Posição registrada com ID {pos_id}.")
         elif args.subcmd == "list":

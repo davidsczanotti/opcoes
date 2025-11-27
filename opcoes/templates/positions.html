@@ -16,6 +16,8 @@
         <div class="navbar-nav">
           <a class="nav-link" href="/">Ranking</a>
           <a class="nav-link active" href="/positions">Posições</a>
+          <a class="nav-link" href="/covered-call">Covered Call</a>
+          <a class="nav-link" href="/settings">Configurações</a>
         </div>
       </div>
     </nav>
@@ -59,6 +61,13 @@
               </select>
             </div>
             <div class="col-md-2">
+              <label class="form-label small">Simulado?</label>
+              <select name="is_simulated" class="form-select form-select-sm">
+                <option value="0">Não (real)</option>
+                <option value="1">Sim (fictício)</option>
+              </select>
+            </div>
+            <div class="col-md-2">
               <label class="form-label small">IRRF</label>
               <input name="irrf" type="number" step="0.01" class="form-control form-control-sm" placeholder="opcional">
             </div>
@@ -85,6 +94,7 @@
                 <th>Ativo</th>
                 <th>Status</th>
                 <th>Tipo</th>
+                <th>Simulado?</th>
                 <th>Data</th>
                 <th>Venc.</th>
                 <th>D. Úteis</th>
@@ -118,6 +128,12 @@
                       <select name="trade_type" class="form-select form-select-sm">
                         <option value="swing" {% if pos.trade_type == 'swing' %}selected{% endif %}>swing</option>
                         <option value="daytrade" {% if pos.trade_type == 'daytrade' %}selected{% endif %}>day trade</option>
+                      </select>
+                    </td>
+                    <td style="min-width: 110px;">
+                      <select name="is_simulated" class="form-select form-select-sm">
+                        <option value="0" {% if not pos.is_simulated %}selected{% endif %}>Não</option>
+                        <option value="1" {% if pos.is_simulated %}selected{% endif %}>Sim</option>
                       </select>
                     </td>
                     <td style="min-width: 115px;"><input name="trade_date" class="form-control form-control-sm" value="{{ pos.trade_date }}"></td>

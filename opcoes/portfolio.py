@@ -60,6 +60,7 @@ def _ensure_position_columns(conn: sqlite3.Connection) -> None:
         "exit_reason": "TEXT",
         "trade_type": "TEXT",
         "irrf": "REAL",
+        "is_simulated": "INTEGER DEFAULT 0",
     }
     for col, col_type in columns.items():
         if col not in existing:
@@ -86,13 +87,14 @@ def add_position(
     partial_price: Optional[float] = None,
     partial_qty: Optional[int] = None,
     exit_reason: Optional[str] = None,
+    is_simulated: bool = False,
 ) -> int:
     conn = _connect()
     cursor = conn.cursor()
     cursor.execute(
         """
-        INSERT INTO positions (ticker, underlying, trade_date, qty, entry_price, fees, trade_type, irrf, notes, partial_date, partial_price, partial_qty, exit_reason)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO positions (ticker, underlying, trade_date, qty, entry_price, fees, trade_type, irrf, notes, partial_date, partial_price, partial_qty, exit_reason, is_simulated)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             _normalize_ticker(ticker),
@@ -108,6 +110,7 @@ def add_position(
             float(partial_price) if partial_price is not None else None,
             int(partial_qty) if partial_qty is not None else None,
             exit_reason,
+            1 if is_simulated else 0,
         ),
     )
     conn.commit()
@@ -153,6 +156,7 @@ def update_position(
     exit_reason: Optional[str] = None,
     trade_type: Optional[str] = None,
     irrf: Optional[float] = None,
+    is_simulated: Optional[bool] = None,
 ) -> None:
     fields = []
     params = []
@@ -198,6 +202,9 @@ def update_position(
     if irrf is not None:
         fields.append("irrf = ?")
         params.append(float(irrf))
+    if is_simulated is not None:
+        fields.append("is_simulated = ?")
+        params.append(1 if is_simulated else 0)
     if not fields:
         return
 
@@ -245,7 +252,10 @@ def list_positions(
             snap."score_total" AS last_score_total,
             snap."trend_flag" AS last_trend_flag,
             snap."vencimento" AS last_vencimento,
-            snap."dias_uteis" AS last_dias_uteis
+            snap."dias_uteis" AS last_dias_uteis,
+            snap."underlying_price" AS last_underlying_price,
+            snap."extrinsic_pct_spot" AS last_extrinsic_pct_spot,
+            snap."%_Alta_p_2x" AS last_pct_2x
         FROM positions p
         LEFT JOIN (
             SELECT os1.*
@@ -297,6 +307,13 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     last_price = parse_decimal(row["last_price_raw"])
     open_qty = max(qty - partial_qty, 0)
 
+    is_sim_raw = 0
+    if "is_simulated" in row.keys():
+        try:
+            is_sim_raw = int(row["is_simulated"] or 0)
+        except (TypeError, ValueError):
+            is_sim_raw = 0
+
     realized_pl = None
     if partial_qty and partial_price is not None:
         realized_pl = (partial_price - entry_price) * partial_qty
@@ -321,6 +338,16 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
         numerator = (realized_pl or 0.0) - fees
         be_price = entry_price - (numerator / open_qty)
         breakeven = be_price
+
+    underlying_price = None
+    extrinsic_pct_spot = None
+    pct_2x = None
+    if "last_underlying_price" in row.keys():
+        underlying_price = parse_decimal(row["last_underlying_price"])
+    if "last_extrinsic_pct_spot" in row.keys():
+        extrinsic_pct_spot = parse_decimal(row["last_extrinsic_pct_spot"])
+    if "last_pct_2x" in row.keys():
+        pct_2x = parse_decimal(row["last_pct_2x"])
 
     return {
         "id": row["id"],
@@ -349,6 +376,10 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
         "breakeven_price": breakeven,
         "trade_type": row["trade_type"],
         "irrf": row["irrf"],
+        "is_simulated": bool(is_sim_raw),
+        "underlying_price": underlying_price,
+        "extrinsic_pct_spot": extrinsic_pct_spot,
+        "pct_2x": pct_2x,
     }
 
 
