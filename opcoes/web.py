@@ -67,6 +67,8 @@ def create_app() -> Flask:
 
     @app.route("/covered-call")
     def covered_call() -> str:
+        # Ativo base padrão para covered call (pode ser alterado via query string).
+        underlying = (request.args.get("underlying", "CMIG4") or "CMIG4").strip().upper()
         # Filtros padrão para a estratégia:
         # - prêmio extrínseco >= 2% sobre o spot
         # - vencimentos a partir de ~30 dias (até 200 por padrão, ajustável)
@@ -80,11 +82,12 @@ def create_app() -> Flask:
         positions_real = [p for p in positions_open if not p.get("is_simulated")]
         positions_simulated = [p for p in positions_open if p.get("is_simulated")]
 
-        stock_real, lots_real, covered_real = _bova_coverage(positions_real)
-        stock_sim, lots_sim, covered_sim = _bova_coverage(positions_simulated)
+        stock_real, lots_real, covered_real = _bova_coverage(positions_real, underlying)
+        stock_sim, lots_sim, covered_sim = _bova_coverage(positions_simulated, underlying)
 
         suggestions = _fetch_bova_suggestions(
             db_path=Path("data/opcoes_snapshots.db"),
+            underlying=underlying,
             min_extrinsic=min_extrinsic,
             min_days=min_days,
             max_days=max_days,
@@ -93,6 +96,7 @@ def create_app() -> Flask:
 
         return render_template(
             "covered_call.html",
+            underlying=underlying,
             stock_real=stock_real,
             stock_sim=stock_sim,
             covered_real=covered_real,
@@ -275,12 +279,14 @@ def create_app() -> Flask:
                 + (float(fees_cfg.equity_percent) / 100.0) * value,
             )
 
-        # Caso contrário, usamos regra de opções (strike * 100 * contratos).
+        # Caso contrário, usamos regra de opções.
         strike = _lookup_option_strike(t)
         if not strike or strike <= 0:
             # Sem strike conhecido, pelo menos aplicamos a parte fixa.
             return max(0.0, float(fees_cfg.option_fixed))
-        notional = strike * 100.0 * qty
+        # Interpretação: qty = número de opções (mesmo número de ações expostas).
+        # Valor nocional aproximado = strike * qty.
+        notional = strike * qty
         return max(
             0.0,
             float(fees_cfg.option_fixed)
@@ -337,8 +343,8 @@ def create_app() -> Flask:
             segments["aposta"].append(o)
         return segments
 
-    def _bova_coverage(positions: list[dict]) -> tuple[dict, list[dict], list[dict]]:
-        """Calcula alocação de BOVA11 -> calls via FIFO, por grupo (real/simulado).
+    def _bova_coverage(positions: list[dict], underlying: str) -> tuple[dict, list[dict], list[dict]]:
+        """Calcula alocação de underlying -> calls via FIFO, por grupo (real/simulado).
 
         Retorna:
         - resumo de estoque (shares_total/cobertas/livres + min/máx/média dos livres)
@@ -346,17 +352,17 @@ def create_app() -> Flask:
         - lista de calls de BOVA11 em aberto (para conveniência do template)
         """
 
-        # Lotes de BOVA11 (ticker == BOVA11)
+        # Lotes do ativo-objeto (ticker == underlying)
         bova_lots = [
             p
             for p in positions
-            if (p.get("ticker") or "").upper() == "BOVA11"
+            if (p.get("ticker") or "").upper() == underlying.upper()
         ]
-        # Calls de BOVA11 (underlying == BOVA11, ticker != BOVA11)
+        # Calls do ativo-objeto (underlying == underlying, ticker != underlying)
         call_positions = [
             p
             for p in positions
-            if (p.get("underlying") or "").upper() == "BOVA11" and (p.get("ticker") or "").upper() != "BOVA11"
+            if (p.get("underlying") or "").upper() == underlying.upper() and (p.get("ticker") or "").upper() != underlying.upper()
         ]
 
         # Ordena lotes e calls por data (FIFO)
@@ -382,11 +388,13 @@ def create_app() -> Flask:
                 }
             )
 
-        # Alocação FIFO: cada contrato consome 100 BOVA11
+        # Alocação FIFO: assumimos 1:1 entre opções e ações
         lot_index = 0
         for call in call_positions:
             open_contracts = int(call.get("open_qty") or call.get("qty") or 0)
-            need = open_contracts * 100
+            # Interpretamos qty como quantidade de opções e usamos 1:1
+            # com ações do underlying para cobertura.
+            need = open_contracts
             while need > 0 and lot_index < len(lot_infos):
                 lot = lot_infos[lot_index]
                 available = max(lot["open_qty"] - lot["covered"], 0)
@@ -435,6 +443,7 @@ def create_app() -> Flask:
     def _fetch_bova_suggestions(
         *,
         db_path: Path,
+        underlying: str,
         min_extrinsic: float,
         min_days: int,
         max_days: int,
@@ -464,10 +473,10 @@ def create_app() -> Flask:
                     score_total
                 FROM option_snapshots
                 WHERE snapshot_date = ?
-                  AND UPPER(underlying) = 'BOVA11'
+                  AND UPPER(underlying) = ?
                   AND dias_uteis IS NOT NULL
                 """,
-                (snapshot_date,),
+                (snapshot_date, underlying.upper()),
             ).fetchall()
         finally:
             conn.close()

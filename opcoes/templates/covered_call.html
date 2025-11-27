@@ -23,16 +23,16 @@
     </nav>
 
     <div class="container">
-      <h1 class="h4 mb-3">Covered Call – BOVA11</h1>
+      <h1 class="h4 mb-3">Covered Call – {{ underlying }}</h1>
 
       <div class="row mb-4">
         <div class="col-md-6">
           <div class="card">
-            <div class="card-header">Estoque BOVA11 (real)</div>
+            <div class="card-header">Estoque {{ underlying }} (real)</div>
             <div class="card-body">
               <div class="row">
                 <div class="col-4">
-                  <div class="text-muted small">BOVA11 total</div>
+                  <div class="text-muted small">{{ underlying }} total</div>
                   <div class="fs-5">{{ stock_real.shares_total }}</div>
                 </div>
                 <div class="col-4">
@@ -69,11 +69,11 @@
         </div>
         <div class="col-md-6">
           <div class="card">
-            <div class="card-header">Estoque BOVA11 (simulado)</div>
+            <div class="card-header">Estoque {{ underlying }} (simulado)</div>
             <div class="card-body">
               <div class="row">
                 <div class="col-4">
-                  <div class="text-muted small">BOVA11 total</div>
+                  <div class="text-muted small">{{ underlying }} total</div>
                   <div class="fs-5">{{ stock_sim.shares_total }}</div>
                 </div>
                 <div class="col-4">
@@ -110,9 +110,9 @@
         </div>
       </div>
 
-      <h2 class="h5 mt-4">Lotes de BOVA11 (real)</h2>
+      <h2 class="h5 mt-4">Lotes de {{ underlying }} (real)</h2>
       {% if not lots_real %}
-        <p class="text-muted small">Nenhum lote de BOVA11 real cadastrado.</p>
+        <p class="text-muted small">Nenhum lote de {{ underlying }} real cadastrado.</p>
       {% else %}
         <div class="table-responsive mb-4">
           <table class="table table-sm table-striped align-middle">
@@ -140,9 +140,9 @@
         </div>
       {% endif %}
 
-      <h2 class="h5 mt-4">Lotes de BOVA11 (simulado)</h2>
+      <h2 class="h5 mt-4">Lotes de {{ underlying }} (simulado)</h2>
       {% if not lots_sim %}
-        <p class="text-muted small">Nenhum lote de BOVA11 simulado cadastrado.</p>
+        <p class="text-muted small">Nenhum lote de {{ underlying }} simulado cadastrado.</p>
       {% else %}
         <div class="table-responsive mb-4">
           <table class="table table-sm table-striped align-middle">
@@ -170,9 +170,9 @@
         </div>
       {% endif %}
 
-      <h2 class="h5 mt-4">Calls de BOVA11 em aberto (real)</h2>
+      <h2 class="h5 mt-4">Calls de {{ underlying }} em aberto (real)</h2>
       {% if not covered_real %}
-        <p class="text-muted small">Nenhuma call de BOVA11 em aberto nas posições reais.</p>
+        <p class="text-muted small">Nenhuma call de {{ underlying }} em aberto nas posições reais.</p>
       {% else %}
         <div class="table-responsive mb-4">
           <table class="table table-sm table-striped align-middle">
@@ -222,9 +222,9 @@
         </div>
       {% endif %}
 
-      <h2 class="h5 mt-4">Calls de BOVA11 em aberto (simulado)</h2>
+      <h2 class="h5 mt-4">Calls de {{ underlying }} em aberto (simulado)</h2>
       {% if not covered_sim %}
-        <p class="text-muted small">Nenhuma call de BOVA11 em aberto nas posições simuladas.</p>
+        <p class="text-muted small">Nenhuma call de {{ underlying }} em aberto nas posições simuladas.</p>
       {% else %}
         <div class="table-responsive mb-4">
           <table class="table table-sm table-striped align-middle">
@@ -274,9 +274,9 @@
         </div>
       {% endif %}
 
-      <h2 class="h5 mt-4">Sugestões de novas calls para BOVA11</h2>
+      <h2 class="h5 mt-4">Sugestões de novas calls para {{ underlying }}</h2>
       <p class="text-muted small">
-        Filtra opções de BOVA11 no último snapshot com prêmio extrínseco mínimo e dias úteis até o vencimento.
+        Filtra opções de {{ underlying }} no último snapshot com prêmio extrínseco mínimo e dias úteis até o vencimento.
         Use esse painel como apoio para encontrar strikes/vencimentos para suas covered calls.
       </p>
       {% if not suggestions %}

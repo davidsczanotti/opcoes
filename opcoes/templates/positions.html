@@ -206,9 +206,15 @@
                         <input name="notes" class="form-control form-control-sm" placeholder="Notas" value="{{ pos.notes }}">
                       </div>
                       <div>
-                        <form method="post" action="/positions/delete/{{ pos.id }}" onsubmit="return confirm('Excluir posição {{ pos.ticker }}?');">
-                          <button class="btn btn-outline-danger btn-sm" type="submit">Excluir</button>
-                        </form>
+                        <button
+                          class="btn btn-outline-danger btn-sm"
+                          type="submit"
+                          formaction="/positions/delete/{{ pos.id }}"
+                          formmethod="post"
+                          onclick="return confirm('Excluir posição {{ pos.ticker }}?');"
+                        >
+                          Excluir
+                        </button>
                       </div>
                     </td>
                   </form>
