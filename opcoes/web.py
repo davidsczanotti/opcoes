@@ -5,10 +5,10 @@ from pathlib import Path
 
 from flask import Flask, redirect, render_template, request, url_for
 
-from .report import generate_report
-from .portfolio import list_positions, add_position, update_position, delete_position
+from .portfolio import add_position, delete_position, list_positions, update_position
 from .scraper.storage import _parse_ptbr_number
 from .settings import FeeSettings, get_fee_settings, update_fee_settings
+from .strategies import get_covered_call_context, get_ranking_context
 
 
 def create_app() -> Flask:
@@ -16,100 +16,13 @@ def create_app() -> Flask:
 
     @app.route("/")
     def index() -> str:
-        min_score = _get_int_arg("min_score", 8)
-        limit = _get_int_arg("limit", 30)
-        recurring_days = _get_int_arg("recurring_days", 30)
-        recurring_limit = _get_int_arg("recurring_limit", 15)
-        underlying_filter = request.args.get("underlying", "").strip().upper()
-
-        data = generate_report(min_score=min_score, limit=limit, recurring_days=recurring_days, recurring_limit=recurring_limit)
-        if underlying_filter:
-            data.opportunities = [
-                o
-                for o in data.opportunities
-                if underlying_filter in (o.get("underlying") or "").upper() or underlying_filter in (o.get("ticker") or "").upper()
-            ]
-            data.recurring_opportunities = [
-                o
-                for o in data.recurring_opportunities
-                if underlying_filter in (o.get("underlying") or "").upper() or underlying_filter in (o.get("ticker") or "").upper()
-            ]
-
-        alerts_map = {}
-        for alert in data.alerts:
-            pos = alert.get("position")
-            if not pos:
-                continue
-            alerts_map[pos.get("id")] = alert.get("reasons", [])
-
-        positions_real = [p for p in data.positions if not p.get("is_simulated")]
-        positions_simulated = [p for p in data.positions if p.get("is_simulated")]
-        totals_real = _compute_totals(positions_real)
-        totals_simulated = _compute_totals(positions_simulated)
-        all_opps = list(data.opportunities) + list(data.theoretical_opportunities)
-        segments = _segment_opportunities(all_opps)
-
-        return render_template(
-            "index.html",
-            data=data,
-            min_score=min_score,
-            limit=limit,
-            recurring_days=recurring_days,
-            recurring_limit=recurring_limit,
-            underlying_filter=underlying_filter,
-            alerts_map=alerts_map,
-            totals_real=totals_real,
-            totals_simulated=totals_simulated,
-            positions_real=positions_real,
-            positions_simulated=positions_simulated,
-            segments=segments,
-        )
+        ctx = get_ranking_context(request.args)
+        return render_template("index.html", **ctx)
 
     @app.route("/covered-call")
     def covered_call() -> str:
-        # Ativo base padrão para covered call (pode ser alterado via query string).
-        underlying = (request.args.get("underlying", "CMIG4") or "CMIG4").strip().upper()
-        # Filtros padrão para a estratégia:
-        # - prêmio extrínseco >= 2% sobre o spot
-        # - vencimentos a partir de ~30 dias (até 200 por padrão, ajustável)
-        # - strike ao menos 1% acima do spot (dist_perc_strike >= 1)
-        min_extrinsic = float(request.args.get("min_extrinsic", 2.0) or 0.0)
-        min_days = _get_int_arg("min_days", 30)
-        max_days = _get_int_arg("max_days", 200)
-        min_dist_strike = float(request.args.get("min_dist_strike", 1.0) or 0.0)
-
-        positions_open = list_positions(include_closed=False)
-        positions_real = [p for p in positions_open if not p.get("is_simulated")]
-        positions_simulated = [p for p in positions_open if p.get("is_simulated")]
-
-        stock_real, lots_real, covered_real = _bova_coverage(positions_real, underlying)
-        stock_sim, lots_sim, covered_sim = _bova_coverage(positions_simulated, underlying)
-
-        call_summary_real = _call_cashflow_summaries(covered_real, lots_real)
-        call_summary_sim = _call_cashflow_summaries(covered_sim, lots_sim)
-
-        suggestions = _fetch_bova_suggestions(
-            db_path=Path("data/opcoes_snapshots.db"),
-            underlying=underlying,
-            min_extrinsic=min_extrinsic,
-            min_days=min_days,
-            max_days=max_days,
-            min_dist_strike=min_dist_strike,
-        )
-
-        return render_template(
-            "covered_call.html",
-            underlying=underlying,
-            stock_real=stock_real,
-            stock_sim=stock_sim,
-            covered_real=covered_real,
-            covered_sim=covered_sim,
-            lots_real=lots_real,
-            lots_sim=lots_sim,
-            call_summary_real=call_summary_real,
-            call_summary_sim=call_summary_sim,
-            suggestions=suggestions,
-        )
+        ctx = get_covered_call_context(request.args)
+        return render_template("covered_call.html", **ctx)
 
     @app.route("/settings", methods=["GET", "POST"])
     def settings_view() -> str:
@@ -204,12 +117,6 @@ def create_app() -> Flask:
     def delete_position_view(position_id: int):
         delete_position(position_id=position_id)
         return redirect(url_for("positions"))
-
-    def _get_int_arg(name: str, default: int) -> int:
-        try:
-            return int(request.args.get(name, default))
-        except (TypeError, ValueError):
-            return default
 
     def _parse_form_float(value: str | None) -> float:
         if not value:
