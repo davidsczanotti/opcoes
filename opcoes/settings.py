@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Dict
 
-DB_PATH = Path("data/opcoes_snapshots.db")
+from .config import get_db_path
 
 
 @dataclass
@@ -17,7 +16,8 @@ class FeeSettings:
 
 
 def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
+    db_path = get_db_path()
+    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     _ensure_table(conn)
     return conn
@@ -97,4 +97,3 @@ def update_fee_settings(
 
 
 __all__ = ["FeeSettings", "get_fee_settings", "update_fee_settings"]
-

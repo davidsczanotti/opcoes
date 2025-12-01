@@ -1,18 +1,16 @@
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import dataclass
-from pathlib import Path
 from typing import Iterable, List, Optional
 
+from .config import get_db_path
 from .scraper.storage import _ensure_parent
-
-DB_PATH = Path("data/opcoes_snapshots.db")
 
 
 def _connect() -> sqlite3.Connection:
-    _ensure_parent(DB_PATH)
-    conn = sqlite3.connect(DB_PATH)
+    db_path = get_db_path()
+    _ensure_parent(db_path)
+    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     _ensure_tables(conn)
     return conn

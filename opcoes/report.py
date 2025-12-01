@@ -5,13 +5,11 @@ import math
 import sqlite3
 import statistics
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Dict, List, Optional
 
 from .scraper.storage import _ensure_parent
+from .config import get_db_path
 from .portfolio import list_positions
-
-DB_PATH = Path("data/opcoes_snapshots.db")
 
 
 @dataclass
@@ -100,8 +98,9 @@ def generate_report(
 
 
 def _connect() -> sqlite3.Connection:
-    _ensure_parent(DB_PATH)
-    conn = sqlite3.connect(DB_PATH)
+    db_path = get_db_path()
+    _ensure_parent(db_path)
+    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     return conn
 

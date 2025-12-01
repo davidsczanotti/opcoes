@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Tuple
 
 from ..portfolio import list_positions
+from ..snapshot_repository import fetch_latest_underlying_options
 from ..scraper.storage import _parse_ptbr_number
 
 
@@ -214,44 +214,14 @@ def _parse_float(value) -> float | None:
 
 def _fetch_bova_suggestions(
     *,
-    db_path: Path,
     underlying: str,
     min_extrinsic: float,
     min_days: int,
     max_days: int,
     min_dist_strike: float,
+    db_path: Path | None = None,
 ) -> List[Dict]:
-    if not db_path.exists():
-        return []
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        row = conn.execute("SELECT MAX(snapshot_date) AS d FROM option_snapshots").fetchone()
-        snapshot_date = row["d"] if row else None
-        if not snapshot_date:
-            return []
-        rows = conn.execute(
-            """
-                SELECT
-                    ticker,
-                    underlying,
-                    vencimento,
-                    dias_uteis,
-                    strike,
-                    dist_perc_strike,
-                    underlying_price,
-                    extrinsic_pct_spot,
-                    "%_Alta_p_2x" AS pct_2x,
-                    score_total
-                FROM option_snapshots
-                WHERE snapshot_date = ?
-                  AND UPPER(underlying) = ?
-                  AND dias_uteis IS NOT NULL
-                """,
-            (snapshot_date, underlying.upper()),
-        ).fetchall()
-    finally:
-        conn.close()
+    rows = fetch_latest_underlying_options(underlying=underlying, db_path=db_path)
 
     suggestions: List[Dict] = []
     for r in rows:
@@ -307,7 +277,6 @@ def get_covered_call_context(args: Mapping[str, Any]) -> Dict[str, Any]:
     call_summary_sim = _call_cashflow_summaries(covered_sim, lots_sim)
 
     suggestions = _fetch_bova_suggestions(
-        db_path=Path("data/opcoes_snapshots.db"),
         underlying=underlying,
         min_extrinsic=min_extrinsic,
         min_days=min_days,
