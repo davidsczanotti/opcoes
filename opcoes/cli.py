@@ -16,7 +16,7 @@ from .backfill_yfinance import backfill_prices
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="opcoes",
-        description="Coletor diário de opções CALLs Europeias do opcoes.net.br",
+        description="Coletor diário de opções CALLs do opcoes.net.br",
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 

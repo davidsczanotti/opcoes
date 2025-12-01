@@ -94,11 +94,12 @@ async def test_select_filters(page: Page) -> None:
     assert _percent(left_style) <= 1.0
     assert _percent(right_style) >= 99.0
 
-    await run._set_modalidade_e(page)
+    await run._clear_modalidade_filter(page)
     await run._wait_table_update(page, THROTTLE)
     mod_value = await page.locator(selectors.SELECT_MOD_FILTER).input_value()
-    assert mod_value == "E"
+    assert mod_value in ("", None, "A", "E")
 
     rows = await run._collect_table_rows(page, symbol, far_quotes={})
     assert rows, "Esperamos pelo menos uma linha após aplicar filtros"
-    assert all((row["mod"] == "E" or not row["mod"]) for row in rows)
+    # Aceita modalidade A ou E; filtro acontecerá depois no relatório.
+    assert all((row["mod"] in ("A", "E", "") for row in rows))

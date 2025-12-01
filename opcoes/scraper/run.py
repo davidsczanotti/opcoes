@@ -357,14 +357,13 @@ async def _scrape_symbol(
     await _stretch_strike_slider(page)
     await _wait_table_update(page, throttle_sec)
 
-    await _set_modalidade_e(page)
+    await _clear_modalidade_filter(page)
     await _wait_table_update(page, throttle_sec)
 
     await _show_all_rows(page)
     await _wait_table_update(page, throttle_sec)
 
     rows = await _collect_table_rows(page, symbol, far_quotes=far_quotes or {})
-    rows = [row for row in rows if (row.get("mod") or "").strip().upper() == "E"]
     return rows
 
 
@@ -464,13 +463,16 @@ async def _stretch_strike_slider(page: Page) -> None:
     await drag_handle(handles.nth(1), box["x"] + box["width"])
 
 
-async def _set_modalidade_e(page: Page) -> None:
+async def _clear_modalidade_filter(page: Page) -> None:
+    """Tenta limpar o filtro de modalidade para trazer A e E."""
+
     select = page.locator(SELECT_MOD_FILTER)
     count = await select.count()
     if not count:
         return
     for idx in range(count):
-        await select.nth(idx).select_option(value="E")
+        # Valor vazio representa "todas" na DataTable; se falhar, ignoramos.
+        await select.nth(idx).select_option(value="")
 
 
 async def _show_all_rows(page: Page) -> None:
