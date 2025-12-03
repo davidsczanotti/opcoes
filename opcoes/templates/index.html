@@ -433,9 +433,10 @@
         </div>
       {% endif %}
 
-      <h2 class="h5 mt-4">Segmentos por moneyness</h2>
+      <h2 class="h5 mt-4">Segmentos por perfil (delta/moneyness)</h2>
       <p class="text-muted small">
-        Carteira/Substituição = ITM; Alavancagem = 0-5% OTM/colada; Aposta assimétrica = demais OTM.
+        Carteira/Substituição ≈ delta 0,7–0,9 (tipicamente ITM); Alavancagem ≈ delta 0,4–0,7 (0–5% OTM/colada);
+        Aposta assimétrica ≈ delta &lt; 0,4 (demais OTM).
       </p>
       {% for key, label in {"carteira": "Carteira/Substituição", "alavancagem": "Alavancagem (colada/ATM)", "aposta": "Aposta assimétrica"}.items() %}
         <h3 class="h6 mt-3">{{ label }}</h3>
