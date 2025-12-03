@@ -55,7 +55,19 @@ def _segment_opportunities(opps: List[Dict]) -> Dict[str, List[Dict]]:
         except (TypeError, ValueError):
             delta_val = None
 
-        if "itm" in status or (delta_val is not None and delta_val >= 0.7):
+        # Usa delta como critério principal quando disponível.
+        if delta_val is not None:
+            if delta_val >= 0.7:
+                segments["carteira"].append(o)
+                continue
+            if 0.4 <= delta_val < 0.7:
+                segments["alavancagem"].append(o)
+                continue
+            segments["aposta"].append(o)
+            continue
+
+        # Fallback para quando delta não estiver disponível.
+        if "itm" in status:
             segments["carteira"].append(o)
             continue
         if "0-5% otm" in status or "colada" in status or "atm" in status:
@@ -121,4 +133,3 @@ def get_ranking_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         "positions_simulated": positions_simulated,
         "segments": segments,
     }
-

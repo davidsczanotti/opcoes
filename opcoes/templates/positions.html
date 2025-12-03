@@ -161,7 +161,9 @@
                     <td class="text-end">
                       {% if pos.breakeven_price is not none %}{{ "%.2f"|format(pos.breakeven_price) }}{% else %}-{% endif %}
                     </td>
-                    <td class="text-end">{{ pos.score_total or '-' }}</td>
+                    <td class="text-end">
+                      {% if pos.score_total is not none %}{{ "%.2f"|format(pos.score_total) }}{% else %}-{% endif %}
+                    </td>
                     <td>{{ pos.trend_flag or '-' }}</td>
                     <td class="text-end">
                       {% if pos.realized_pl is not none %}{{ "%.2f"|format(pos.realized_pl) }}{% else %}-{% endif %}

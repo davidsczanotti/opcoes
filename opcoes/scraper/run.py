@@ -8,6 +8,7 @@ import datetime as dt
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
+import yfinance as yf
 from playwright.async_api import (
     TimeoutError as PlaywrightTimeoutError,
     async_playwright,
@@ -158,6 +159,13 @@ async def scrape_all(
             if not rows:
                 print("  -> sem resultados.")
                 continue
+
+            # Fallback/auditoria: tenta completar bid/ask via Yahoo Finance
+            # apenas para contratos que ainda não têm ask válido vindo do opcoes.net.
+            try:
+                _enrich_rows_with_yahoo_options(symbol, rows)
+            except Exception as exc:  # noqa: BLE001
+                print(f"Aviso: falhou enriquecimento via Yahoo para {symbol}: {exc}")
 
             site_price, site_price_date = await _extract_site_price(page)
 
@@ -567,6 +575,141 @@ def _merge_far_quote(record: Dict[str, str], far_quotes: Dict[str, dict]) -> Non
         last = quote.get("ultimo")
         if last is not None:
             record["ultimo"] = _format_decimal(float(last), decimals=2, signed=False)
+
+
+def _to_yahoo_symbol(symbol: str) -> Optional[str]:
+    if not symbol:
+        return None
+    s = symbol.strip().upper()
+    if not s:
+        return None
+    if "." in s:
+        return s
+    return f"{s}.SA"
+
+
+def _enrich_rows_with_yahoo_options(underlying: str, rows: List[Dict[str, str]]) -> None:
+    """Usa yfinance.option_chain como fallback/auditoria para bid/ask.
+
+    - Não mexe em linhas que já tenham best_ask > 0.
+    - Só busca expirações/strikes necessários para as linhas sem ask.
+    - Não falha o scraper em caso de erro na API do Yahoo.
+    """
+
+    yahoo_symbol = _to_yahoo_symbol(underlying)
+    if not yahoo_symbol:
+        return
+
+    # Mapa expiração ISO -> strikes (aprox. 2 casas) que precisam de ask.
+    needed_by_exp: Dict[str, set[float]] = {}
+    for row in rows:
+        existing_ask = _parse_float(row.get("best_ask"))
+        if existing_ask is not None and existing_ask > 0:
+            continue
+        venc = (row.get("vencimento") or "").strip()
+        strike = _parse_float(row.get("strike"))
+        if not venc or strike is None:
+            continue
+        try:
+            exp_date = dt.datetime.strptime(venc, "%d/%m/%Y").date()
+        except ValueError:
+            continue
+        exp_str = exp_date.isoformat()
+        strikes = needed_by_exp.setdefault(exp_str, set())
+        strikes.add(round(strike, 2))
+
+    if not needed_by_exp:
+        return
+
+    try:
+        ticker = yf.Ticker(yahoo_symbol)
+        available_exps = set(ticker.options or [])
+    except Exception as exc:  # noqa: BLE001
+        print(f"Aviso: falhou option_chain para {underlying}: {exc}")
+        return
+
+    quote_map: Dict[Tuple[str, float], Tuple[Optional[float], Optional[float]]] = {}
+
+    for exp_str, strikes in needed_by_exp.items():
+        if exp_str not in available_exps:
+            continue
+        try:
+            chain = ticker.option_chain(exp_str)
+        except Exception:
+            continue
+        calls = getattr(chain, "calls", None)
+        if calls is None or getattr(calls, "empty", False):
+            continue
+
+        for _, opt in calls.iterrows():
+            strike_val = opt.get("strike")
+            if strike_val is None:
+                continue
+            try:
+                strike_f = float(strike_val)
+            except (TypeError, ValueError):
+                continue
+            strike_key = round(strike_f, 2)
+            if strike_key not in strikes:
+                continue
+
+            bid_raw = opt.get("bid")
+            ask_raw = opt.get("ask")
+            bid: Optional[float] = None
+            ask: Optional[float] = None
+
+            try:
+                if bid_raw is not None:
+                    bid_f = float(bid_raw)
+                    if not math.isnan(bid_f) and bid_f > 0:
+                        bid = bid_f
+            except (TypeError, ValueError):
+                bid = None
+
+            try:
+                if ask_raw is not None:
+                    ask_f = float(ask_raw)
+                    if not math.isnan(ask_f) and ask_f > 0:
+                        ask = ask_f
+            except (TypeError, ValueError):
+                ask = None
+
+            if bid is None and ask is None:
+                continue
+
+            prev = quote_map.get((exp_str, strike_key))
+            prev_bid = prev[0] if prev else None
+            prev_ask = prev[1] if prev else None
+            quote_map[(exp_str, strike_key)] = (
+                bid if bid is not None else prev_bid,
+                ask if ask is not None else prev_ask,
+            )
+
+    if not quote_map:
+        return
+
+    for row in rows:
+        venc = (row.get("vencimento") or "").strip()
+        strike = _parse_float(row.get("strike"))
+        if not venc or strike is None:
+            continue
+        try:
+            exp_date = dt.datetime.strptime(venc, "%d/%m/%Y").date()
+        except ValueError:
+            continue
+        exp_str = exp_date.isoformat()
+        strike_key = round(strike, 2)
+        bid, ask = quote_map.get((exp_str, strike_key), (None, None))
+        if bid is None and ask is None:
+            continue
+
+        current_bid = _parse_float(row.get("best_bid"))
+        current_ask = _parse_float(row.get("best_ask"))
+
+        if bid is not None and (current_bid is None or current_bid <= 0):
+            row["best_bid"] = _format_decimal(bid, decimals=2, signed=False)
+        if ask is not None and (current_ask is None or current_ask <= 0):
+            row["best_ask"] = _format_decimal(ask, decimals=2, signed=False)
 
 
 async def _wait_table_update(page: Page, throttle_sec: float) -> None:

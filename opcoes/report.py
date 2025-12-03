@@ -64,6 +64,7 @@ def generate_report(
         else:
             opp["preco_max_10_pct"] = None
             opp["preco_max_20_pct"] = None
+    _adjust_long_call_scores(opportunities)
     recurring_opps, window_start, snapshot_days = _fetch_recurring_opportunities(
         conn, snapshot_date, min_score, recurring_days, recurring_limit
     )
@@ -77,7 +78,39 @@ def generate_report(
         elif opp.get("preco_teorico") is not None:
             theoretical_opps.append(opp)
 
+    # Reordena usando o score ajustado para long calls.
+    def _score_key(o: Dict[str, object]) -> float:
+        try:
+            return float(o.get("score_total") or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    tradeable_opps.sort(key=_score_key, reverse=True)
+    theoretical_opps.sort(key=_score_key, reverse=True)
+
     rational_opps, lottery_opps = _split_remote_lists(tradeable_opps, limit=5)
+
+    # Filtro de recorrência apenas para apostas racionais:
+    # se tivermos presença calculada para o ticker, exigimos um mínimo.
+    presence_index: Dict[str, float] = {}
+    for item in recurring_opps:
+        ticker_key = (str(item.get("ticker") or "")).strip().upper()
+        presence = item.get("presence_pct")
+        if ticker_key and presence is not None:
+            try:
+                presence_index[ticker_key] = float(presence)
+            except (TypeError, ValueError):
+                continue
+
+    MIN_PRESENCE_PCT = 30.0
+    filtered_rational: List[Dict[str, object]] = []
+    for opp in rational_opps:
+        ticker_key = (str(opp.get("ticker") or "")).strip().upper()
+        presence = presence_index.get(ticker_key)
+        if presence is not None and presence < MIN_PRESENCE_PCT:
+            continue
+        filtered_rational.append(opp)
+    rational_opps = filtered_rational
 
     positions = list_positions(include_closed=False)
     alerts = _build_alerts(positions, min_score=min_score)
@@ -387,6 +420,103 @@ def _compute_hv_map(
         except statistics.StatisticsError:
             hv_map[sym] = None
     return hv_map
+
+
+def _long_call_vol_factor(iv_rank: Optional[float], iv_hv_spread: Optional[float]) -> float:
+    """Fator multiplicativo para long calls baseado em IV Rank e IV-HV.
+
+    - Privilegia IV barata (IV-HV <= 0, IV Rank baixo).
+    - Penaliza IV claramente cara (IV-HV muito positivo ou IV Rank muito alto).
+    """
+
+    if iv_rank is None or iv_hv_spread is None:
+        return 1.0
+    try:
+        rank = float(iv_rank)
+        spread = float(iv_hv_spread)
+    except (TypeError, ValueError):
+        return 1.0
+
+    factor = 1.0
+
+    # Componente principal: IV vs HV
+    if spread <= 0.0:
+        factor += 0.25  # leve bônus para IV <= HV
+    elif spread <= 5.0:
+        factor += 0.0
+    elif spread <= 10.0:
+        factor -= 0.20
+    elif spread <= 20.0:
+        factor -= 0.35
+    else:
+        factor -= 0.50
+
+    # Ajuste fino por IV Rank (histórico)
+    if rank <= 20.0:
+        factor += 0.10
+    elif rank <= 60.0:
+        factor += 0.0
+    elif rank <= 80.0:
+        factor -= 0.10
+    else:
+        factor -= 0.20
+
+    return max(0.4, min(1.4, factor))
+
+
+def _long_call_dte_factor(dias_uteis: Optional[int]) -> float:
+    """Fator multiplicativo simples por prazo até o vencimento.
+
+    Favorece janelas intermediárias (aprox. 60–180 dias) para long calls
+    e penaliza extremos (muito curto ou muito longo).
+    """
+
+    if dias_uteis is None:
+        return 1.0
+    try:
+        d = int(dias_uteis)
+    except (TypeError, ValueError):
+        return 1.0
+
+    if d <= 15:
+        return 0.7
+    if d <= 30:
+        return 0.85
+    if d <= 120:
+        return 1.10
+    if d <= 252:
+        return 1.05
+    if d <= 504:
+        return 0.9
+    return 0.8
+
+
+def _adjust_long_call_scores(opps: List[Dict[str, object]]) -> None:
+    """Aplica ajustes de volatilidade e prazo ao score para ranking de long calls.
+
+    - Mantém o score original como base.
+    - Multiplica por fatores baseados em IV Rank / IV-HV e DTE.
+    - Não altera o banco; apenas os objetos usados no relatório/ranking.
+    """
+
+    for opp in opps:
+        base = opp.get("score_total")
+        if base is None:
+            continue
+        try:
+            base_val = float(base)
+        except (TypeError, ValueError):
+            continue
+
+        iv_rank = opp.get("iv_rank_180d")
+        iv_hv_spread = opp.get("iv_hv_spread")
+        dias_uteis = opp.get("dias_uteis")
+
+        vol_factor = _long_call_vol_factor(iv_rank, iv_hv_spread)
+        dte_factor = _long_call_dte_factor(dias_uteis)
+
+        adjusted = base_val * vol_factor * dte_factor
+        opp["score_total"] = adjusted
 
 
 def _parse_decimal(value: Optional[str]) -> Optional[float]:

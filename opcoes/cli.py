@@ -362,7 +362,7 @@ def _print_positions(positions: List[dict]) -> None:
             f"{_format_currency(pos['last_price']):>10} "
             f"{_format_currency(pos['pl']):>12} "
             f"{_format_percent(pos['pl_pct']):>8} "
-            f"{(pos['score_total'] or '-'):>5} "
+            f"{_format_number(pos.get('score_total'), digits=2):>5} "
             f"{(pos['trend_flag'] or '-'):>5}"
         )
 
@@ -370,7 +370,25 @@ def _print_positions(positions: List[dict]) -> None:
 def _format_number(value: Optional[float], digits: int = 2) -> str:
     if value is None:
         return "-"
-    return f"{value:.{digits}f}"
+    try:
+        if isinstance(value, str):
+            text = value.strip()
+            if not text or text == "-":
+                return "-"
+            cleaned = (
+                text.replace("%", "")
+                .replace("+", "")
+                .replace("\u2212", "-")
+                .replace("−", "-")
+            )
+            # Trata números pt-BR com vírgula decimal.
+            cleaned = cleaned.replace(".", "").replace(",", ".")
+            num = float(cleaned)
+        else:
+            num = float(value)
+    except (TypeError, ValueError):
+        return "-"
+    return f"{num:.{digits}f}"
 
 
 def _print_report(data) -> None:
@@ -388,7 +406,7 @@ def _print_report(data) -> None:
         for opp in data.opportunities:
             print(
                 f"{opp['ticker']:<10} {opp['underlying']:<6} "
-                f"{(opp['score_total'] or '-'):>5} "
+                f"{_format_number(opp.get('score_total'), digits=2):>5} "
                 f"{_format_currency(opp['ultimo']):>9} "
                 f"{_format_currency(opp.get('best_ask')):>9} "
                 f"{_format_number(opp.get('spread_pct'), digits=1):>6} "
@@ -428,7 +446,7 @@ def _print_report(data) -> None:
                 f"{opp['hits']:>5d} "
                 f"{presence:>9} "
                 f"{(opp.get('last_seen') or '-'):>10} "
-                f"{(opp.get('score_total') or '-'):>6} "
+                f"{_format_number(opp.get('score_total'), digits=2):>6} "
                 f"{_format_currency(opp.get('ultimo')):>10} "
                 f"{_format_number(opp.get('%_Alta_p_2x')):>8} "
                 f"{_format_number(opp.get('underlying_price')):>8}"

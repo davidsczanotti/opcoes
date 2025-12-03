@@ -373,7 +373,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
         "last_price": last_price,
         "pl": pl,
         "pl_pct": pl_pct,
-        "score_total": row["last_score_total"],
+        "score_total": parse_decimal(row["last_score_total"]),
         "trend_flag": row["last_trend_flag"],
         "vencimento": row["last_vencimento"],
         "dias_uteis": parse_int(row["last_dias_uteis"]),

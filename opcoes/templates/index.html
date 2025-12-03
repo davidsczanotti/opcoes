@@ -100,7 +100,9 @@
                 <tr>
                   <td>{{ opp.ticker }}</td>
                   <td>{{ opp.underlying }}</td>
-                  <td class="text-end">{{ opp.score_total or '-' }}</td>
+                  <td class="text-end">
+                    {% if opp.score_total is not none %}{{ "%.2f"|format(opp.score_total) }}{% else %}-{% endif %}
+                  </td>
                   <td class="text-end">
                     {% if opp.ultimo is not none %}{{ "%.2f"|format(opp.ultimo) }}{% else %}-{% endif %}
                   </td>
@@ -226,7 +228,9 @@
                 <tr>
                   <td>{{ opp.ticker }}</td>
                   <td>{{ opp.underlying }}</td>
-                  <td class="text-end">{{ opp.score_total or '-' }}</td>
+                  <td class="text-end">
+                    {% if opp.score_total is not none %}{{ "%.2f"|format(opp.score_total) }}{% else %}-{% endif %}
+                  </td>
                   <td class="text-end">{{ opp.prob_itm_pct is not none and ('%.1f'|format(opp.prob_itm_pct)) or '-' }}</td>
                   <td class="text-end">{{ opp.extrinsic_pct_spot is not none and ('%.1f'|format(opp.extrinsic_pct_spot)) or '-' }}</td>
                   <td class="text-end">{{ opp['%_Alta_p_2x'] is not none and ('%.1f'|format(opp['%_Alta_p_2x'])) or '-' }}</td>
@@ -262,7 +266,9 @@
                 <tr>
                   <td>{{ opp.ticker }}</td>
                   <td>{{ opp.underlying }}</td>
-                  <td class="text-end">{{ opp.score_total or '-' }}</td>
+                  <td class="text-end">
+                    {% if opp.score_total is not none %}{{ "%.2f"|format(opp.score_total) }}{% else %}-{% endif %}
+                  </td>
                   <td class="text-end">{{ opp.prob_itm_pct is not none and ('%.1f'|format(opp.prob_itm_pct)) or '-' }}</td>
                   <td class="text-end">{{ opp.extrinsic_pct_spot is not none and ('%.1f'|format(opp.extrinsic_pct_spot)) or '-' }}</td>
                   <td class="text-end">{{ opp['%_Alta_p_2x'] is not none and ('%.1f'|format(opp['%_Alta_p_2x'])) or '-' }}</td>
@@ -311,7 +317,9 @@
                 <tr>
                   <td>{{ opp.ticker }}</td>
                   <td>{{ opp.underlying }}</td>
-                  <td class="text-end">{{ opp.score_total or '-' }}</td>
+                  <td class="text-end">
+                    {% if opp.score_total is not none %}{{ "%.2f"|format(opp.score_total) }}{% else %}-{% endif %}
+                  </td>
                   <td class="text-end">
                     {% if opp.ultimo is not none %}{{ "%.2f"|format(opp.ultimo) }}{% else %}-{% endif %}
                   </td>
@@ -406,7 +414,9 @@
                     {% endif %}
                   </td>
                   <td class="text-end">{{ opp.last_seen or '-' }}</td>
-                  <td class="text-end">{{ opp.score_total or '-' }}</td>
+                  <td class="text-end">
+                    {% if opp.score_total is not none %}{{ "%.2f"|format(opp.score_total) }}{% else %}-{% endif %}
+                  </td>
                   <td class="text-end">
                     {% if opp.ultimo is not none %}{{ "%.2f"|format(opp.ultimo) }}{% else %}-{% endif %}
                   </td>
@@ -456,7 +466,9 @@
                   <tr>
                     <td>{{ opp.ticker }}</td>
                     <td>{{ opp.underlying }}</td>
-                    <td class="text-end">{{ opp.score_total or '-' }}</td>
+                    <td class="text-end">
+                      {% if opp.score_total is not none %}{{ "%.2f"|format(opp.score_total) }}{% else %}-{% endif %}
+                    </td>
                     <td class="text-end">
                       {% if opp.best_ask is not none %}
                         {{ "%.2f"|format(opp.best_ask) }}
@@ -584,7 +596,9 @@
                 <td class="text-end">
                   {% if pos.breakeven_price is not none %}{{ "%.2f"|format(pos.breakeven_price) }}{% else %}-{% endif %}
                 </td>
-                <td class="text-end">{{ pos.score_total or '-' }}</td>
+                <td class="text-end">
+                  {% if pos.score_total is not none %}{{ "%.2f"|format(pos.score_total) }}{% else %}-{% endif %}
+                </td>
                 <td>{{ pos.trend_flag or '-' }}</td>
                 <td>
                   {% if has_alert %}
@@ -679,7 +693,9 @@
                 <td class="text-end">
                   {% if pos.breakeven_price is not none %}{{ "%.2f"|format(pos.breakeven_price) }}{% else %}-{% endif %}
                 </td>
-                <td class="text-end">{{ pos.score_total or '-' }}</td>
+                <td class="text-end">
+                  {% if pos.score_total is not none %}{{ "%.2f"|format(pos.score_total) }}{% else %}-{% endif %}
+                </td>
                 <td>{{ pos.trend_flag or '-' }}</td>
                 <td>
                   {% if has_alert %}
