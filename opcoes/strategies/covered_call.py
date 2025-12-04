@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Tuple
 
 from ..portfolio import list_positions
-from ..snapshot_repository import fetch_latest_underlying_options
+from ..snapshot_repository import fetch_latest_underlying_options, fetch_latest_underlying_quote
 from ..scraper.storage import _parse_ptbr_number
 
 
@@ -256,6 +256,24 @@ def _fetch_bova_suggestions(
             -(s.get("extrinsic_pct_spot") or 0.0),
         )
     )
+
+    # Marca a sugestão mais vantajosa com base em um score simples:
+    # extrínseca % sobre o spot por dia útil (quanto maior, melhor).
+    best_idx = None
+    best_score = None
+    for idx, s in enumerate(suggestions):
+        extr = s.get("extrinsic_pct_spot")
+        dias = s.get("dias_uteis")
+        if extr is None or dias is None or dias <= 0:
+            continue
+        score = extr / dias
+        if best_score is None or score > best_score:
+            best_score = score
+            best_idx = idx
+    if best_idx is not None:
+        suggestions[best_idx]["best_flag"] = True
+        suggestions[best_idx]["best_yield_per_day"] = best_score
+
     return suggestions
 
 
@@ -284,8 +302,11 @@ def get_covered_call_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         min_dist_strike=min_dist_strike,
     )
 
+    quote = fetch_latest_underlying_quote(underlying)
+
     return {
         "underlying": underlying,
+        "underlying_quote": quote,
         "stock_real": stock_real,
         "stock_sim": stock_sim,
         "covered_real": covered_real,

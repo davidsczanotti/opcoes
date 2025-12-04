@@ -26,7 +26,30 @@
       <h1 class="h4 mb-3">Covered Call – {{ underlying }}</h1>
 
       <div class="row mb-4">
-        <div class="col-md-6">
+        <div class="col-md-4 mb-3 mb-md-0">
+          <div class="card">
+            <div class="card-header">Cotação {{ underlying }}</div>
+            <div class="card-body">
+              <div class="text-muted small">Spot (último snapshot)</div>
+              <div class="fs-5">
+                {% if underlying_quote and underlying_quote.price is not none %}
+                  R$ {{ "%.2f"|format(underlying_quote.price) }}
+                {% else %}
+                  -
+                {% endif %}
+              </div>
+              <div class="text-muted small mt-2">Data do preço</div>
+              <div>
+                {% if underlying_quote and underlying_quote.price_date %}
+                  {{ underlying_quote.price_date }}
+                {% else %}
+                  -
+                {% endif %}
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-4">
           <div class="card">
             <div class="card-header">Estoque {{ underlying }} (real)</div>
             <div class="card-body">
@@ -67,7 +90,7 @@
             </div>
           </div>
         </div>
-        <div class="col-md-6">
+        <div class="col-md-4">
           <div class="card">
             <div class="card-header">Estoque {{ underlying }} (simulado)</div>
             <div class="card-body">
@@ -248,6 +271,7 @@
           <table class="table table-sm table-striped align-middle">
             <thead class="table-light">
               <tr>
+                <th>ID</th>
                 <th>Data</th>
                 <th class="text-end">Qtd total</th>
                 <th class="text-end">Qtd coberta</th>
@@ -258,6 +282,7 @@
             <tbody>
               {% for lot in lots_sim %}
                 <tr>
+                  <td>{{ lot.id }}</td>
                   <td>{{ lot.trade_date }}</td>
                   <td class="text-end">{{ lot.qty_total }}</td>
                   <td class="text-end">{{ lot.covered }}</td>
@@ -395,6 +420,7 @@
                 <th class="text-end">Extr.% Spot</th>
                 <th class="text-end">% p/ 2x</th>
                 <th class="text-end">Score</th>
+                <th class="text-center">Destaque</th>
               </tr>
             </thead>
             <tbody>
@@ -420,6 +446,13 @@
                   </td>
                   <td class="text-end">
                     {% if opp.score_total is not none %}{{ "%.2f"|format(opp.score_total) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-center">
+                    {% if opp.best_flag %}
+                      ⭐
+                    {% else %}
+                      -
+                    {% endif %}
                   </td>
                 </tr>
               {% endfor %}

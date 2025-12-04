@@ -68,4 +68,46 @@ def fetch_latest_underlying_options(
         conn.close()
 
 
-__all__ = ["latest_snapshot_date", "fetch_latest_underlying_options"]
+def fetch_latest_underlying_quote(
+    underlying: str,
+    *,
+    db_path: Optional[Path] = None,
+) -> Optional[Dict[str, object]]:
+    """Busca a cotação mais recente do underlying em underlying_snapshots."""
+
+    underlying = (underlying or "").strip().upper()
+    if not underlying:
+        return None
+
+    conn = _connect(db_path)
+    try:
+        snapshot_date = latest_snapshot_date(db_path=db_path)
+        if not snapshot_date:
+            return None
+        row = conn.execute(
+            """
+            SELECT snapshot_date, underlying, price, price_date, mm200, return_3m, trend_flag, trend_reason
+            FROM underlying_snapshots
+            WHERE snapshot_date = ?
+              AND UPPER(underlying) = ?
+            LIMIT 1
+            """,
+            (snapshot_date, underlying),
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "snapshot_date": row["snapshot_date"],
+            "underlying": row["underlying"],
+            "price": row["price"],
+            "price_date": row["price_date"],
+            "mm200": row["mm200"],
+            "return_3m": row["return_3m"],
+            "trend_flag": row["trend_flag"],
+            "trend_reason": row["trend_reason"],
+        }
+    finally:
+        conn.close()
+
+
+__all__ = ["latest_snapshot_date", "fetch_latest_underlying_options", "fetch_latest_underlying_quote"]
