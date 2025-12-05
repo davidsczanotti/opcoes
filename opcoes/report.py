@@ -78,6 +78,23 @@ def generate_report(
         elif opp.get("preco_teorico") is not None:
             theoretical_opps.append(opp)
 
+    # Para oportunidades apenas teóricas (sem ask visível), a distorção de preço
+    # deve refletir o desvio do último negócio em relação ao preço justo,
+    # em vez de usar o preço efetivo de compra (que cai no próprio teórico).
+    for opp in theoretical_opps:
+        ultimo = opp.get("ultimo")
+        theo = opp.get("preco_teorico")
+        if ultimo is not None and theo is not None and theo > 0:
+            try:
+                ultimo_val = float(ultimo)
+                theo_val = float(theo)
+            except (TypeError, ValueError):
+                opp["distorcao_preco_pct"] = None
+            else:
+                opp["distorcao_preco_pct"] = (ultimo_val - theo_val) / theo_val * 100.0
+        else:
+            opp["distorcao_preco_pct"] = None
+
     # Reordena usando o score ajustado para long calls.
     def _score_key(o: Dict[str, object]) -> float:
         try:

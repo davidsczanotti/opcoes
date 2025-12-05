@@ -183,6 +183,10 @@ def test_generate_report_computes_iv_and_recurring(monkeypatch, tmp_path, hv_day
     assert theo["iv_hv_spread"] == pytest.approx(theo["vol_impl_perc"] - expected_hv)
     assert theo["desconto_teorico_pct"] is None  # sem ask, não calcula desconto
 
+    # Para oportunidades teóricas, a distorção de preço deve usar Último vs preço justo.
+    expected_dist = (theo["ultimo"] - theo["preco_teorico"]) / theo["preco_teorico"] * 100.0
+    assert theo["distorcao_preco_pct"] == pytest.approx(expected_dist)
+
     # Recorrentes: presença = hits / total de snapshots na janela.
     rec_map = {r["ticker"]: r for r in data.recurring_opportunities}
     assert rec_map["SMAL11"]["hits"] == 5
