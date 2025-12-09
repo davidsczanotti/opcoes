@@ -9,7 +9,7 @@ from .config import get_db_path
 from .portfolio import add_position, delete_position, list_positions, update_position
 from .scraper.storage import _parse_ptbr_number
 from .settings import FeeSettings, get_fee_settings, update_fee_settings
-from .strategies import get_covered_call_context, get_ranking_context
+from .strategies import get_cash_covered_put_context, get_covered_call_context, get_ranking_context
 
 
 def create_app() -> Flask:
@@ -24,6 +24,11 @@ def create_app() -> Flask:
     def covered_call() -> str:
         ctx = get_covered_call_context(request.args)
         return render_template("covered_call.html", **ctx)
+
+    @app.route("/cash-covered-put")
+    def cash_covered_put() -> str:
+        ctx = get_cash_covered_put_context(request.args)
+        return render_template("cash_covered_put.html", **ctx)
 
     @app.route("/settings", methods=["GET", "POST"])
     def settings_view() -> str:

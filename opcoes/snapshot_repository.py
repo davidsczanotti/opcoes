@@ -48,14 +48,22 @@ def fetch_latest_underlying_options(
             SELECT
                 ticker,
                 underlying,
+                option_type,
                 vencimento,
                 dias_uteis,
                 strike,
                 dist_perc_strike,
                 underlying_price,
+                underlying_price_date,
                 extrinsic_pct_spot,
                 "%_Alta_p_2x" AS pct_2x,
-                score_total
+                score_total,
+                best_bid,
+                best_ask,
+                ultimo,
+                preco_teorico,
+                vol_impl_perc,
+                iv_rank_180d
             FROM option_snapshots
             WHERE snapshot_date = ?
               AND UPPER(underlying) = ?

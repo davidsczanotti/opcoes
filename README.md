@@ -1,10 +1,11 @@
-opcoes – Coletor diário de opções (CALLs Europeias)
+opcoes – Coletor diário de opções (CALLs/PUTs)
 
 Este projeto automatiza a coleta diária de opções no site `https://opcoes.net.br/opcoes/bovespa` usando Playwright, aplicando filtros:
-- Tipo: CALLs
-- Vencimentos: até 16 mais próximos (cobrindo também janelas em torno de 30–45 dias)
+- Tipo: Todas (CALLs e PUTs)
+- Lista: Todos os ativos
+- Vencimentos: todos disponíveis
 - Strike: faixa completa (min–max)
-- Modalidade: Europeias (Mod = E)
+- Modalidade: todas (A/E)
 - CSVs saem com delimitador `;` (compatível com locale pt-BR) e números normalizados usando vírgula decimal.
 
 Os resultados são salvos em CSV, sem duplicar tickers já coletados.
@@ -16,7 +17,7 @@ Como rodar
   - `poetry run playwright install chromium`
 
 Executar coleta
-- Coletar todos os papéis (padrão), saída no `data/opcoes_calls_eu.csv`:
+- Coletar todos os papéis (padrão), saída no `data/opcoes_latest.csv` (pode usar como `base_atualizada.csv`):
   - `poetry run python -m opcoes.cli scrape`
   - Após a coleta, roda automaticamente o backfill de preços via yfinance para os underlyings (default: 90 dias) para que HV/IV Rank fiquem com histórico rápido.
     - Para desabilitar: `--no-backfill`
@@ -35,10 +36,10 @@ Executar coleta
   - Ou `--fundamentals statusinvest`
   - O coletor tenta extrair P/L da página da ação em `statusinvest.com.br` e deriva `earnings_yield_ttm = 1 / P/L`.
 
-Enriquecer CSV existente
-- Se você já tem `data/opcoes_calls_eu.csv` e só quer adicionar as colunas de fundamentos usando os tickers da coluna `underlying`:
-  - Usando Status Invest: `poetry run python -m opcoes.cli enrich --statusinvest --input data/opcoes_calls_eu.csv`
-  - Usando CSV de fundamentos: `poetry run python -m opcoes.cli enrich --fundamentals data/fundamentals.csv --input data/opcoes_calls_eu.csv`
+- Enriquecer CSV existente
+- Se você já tem `data/opcoes_latest.csv` (ou `base_atualizada.csv`) e só quer adicionar as colunas de fundamentos usando os tickers da coluna `underlying`:
+  - Usando Status Invest: `poetry run python -m opcoes.cli enrich --statusinvest --input data/opcoes_latest.csv`
+  - Usando CSV de fundamentos: `poetry run python -m opcoes.cli enrich --fundamentals data/fundamentals.csv --input data/opcoes_latest.csv`
   - Por padrão sobrescreve o arquivo de entrada; para escrever em outro caminho, use `--output caminho.csv`.
   - Para focar apenas em Units (e ignorar ETFs/índices), inclua `--only-units`.
 
@@ -68,7 +69,12 @@ Notas
 - Cada execução também persiste snapshots diários em `data/opcoes_snapshots.db`, permitindo comparar rankings dia a dia e alimentar um front-end futuramente.
 - Use `poetry run python -m opcoes.cli position add ...` para registrar compras, `... position list` para acompanhar P/L atual (os valores usam o último snapshot da opção) e `... position close --id X --exit-date ... --price ...` para encerrar posições. O mesmo `opcoes_snapshots.db` guarda os trades em uma tabela `positions`.
 - Após cada coleta, rode `poetry run python -m opcoes.cli report` para ver um resumo do snapshot mais recente (top oportunidades filtradas por score/trend) e o status das posições abertas com alertas automáticos.
- - Para trabalhar no Excel sempre com dados atualizados do último snapshot (e não com o `opcoes_calls_eu.csv` congelado), use `poetry run python -m opcoes.cli snapshot export --output data/opcoes_latest.csv`. Opcionalmente, informe `--date YYYY-MM-DD` para exportar um dia específico.
+- Para trabalhar no Excel sempre com dados atualizados do último snapshot (e não com um CSV congelado), use `poetry run python -m opcoes.cli snapshot export --output data/opcoes_latest.csv`. Opcionalmente, informe `--date YYYY-MM-DD` para exportar um dia específico.
+- Histórico e limpeza:
+  - `poetry run python -m opcoes.cli report` agora persiste automaticamente os rankings do dia em `ranking_entries` (top, racionais, loterias, teóricas). Use `--no-persist` para pular.
+  - Registre uma decisão (guardar a linha completa do snapshot): `poetry run python -m opcoes.cli decision add --ticker B3SAB150 [--snapshot-date YYYY-MM-DD] --notes "..."`
+  - Liste decisões registradas: `poetry run python -m opcoes.cli decision list --limit 20`
+  - Limpeza de históricos vencidos/antigos: `poetry run python -m opcoes.cli cleanup --retention-days 180 --purge-snapshots` (sem `--purge-snapshots` limpa apenas rankings; com a flag também remove snapshots antigos/vencidos). O arquivo legado `opcoes_calls_eu.csv` não é mais usado.
 - Para priorização rápida, o CSV calcula `moneyness_score`, `liquidez_score`, `dobro_score`, `theta_score`, `iv_score` e `score_total` (soma). As regras são:
   - Moneyness: 2 pts se está em `0-5% OTM (colada)`, 1 pt se `5-15% OTM (aposta)`.
   - Liquidez: 2 pts para Status_Liquidez = Alta, 1 pt para Média.

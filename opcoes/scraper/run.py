@@ -18,9 +18,10 @@ from playwright.async_api import (
 
 from .selectors import (
     BASE_URL,
-    SELECT_CALLS_CHECKBOX,
-    SELECT_CALLS_LABEL,
+    SELECT_ALL_TYPES_LABEL,
+    SELECT_ALL_TYPES_RADIO,
     SELECT_ID_ACAO,
+    SELECT_ID_LISTA,
     SELECT_MOD_FILTER,
     SLIDER_STRIKE_HANDLES,
     SLIDER_STRIKE_TRACK,
@@ -37,12 +38,12 @@ from .ivrank import IVRankStore
 from .activity import FlowStore
 from .snapshots import SnapshotDB
 from .far_expirations import fetch_far_expiration_quotes
+from ..utils import infer_option_type
 
 
 # Número de vencimentos a selecionar no filtro da tela.
-# Valores maiores aumentam a cobertura de prazos (incluindo ~30–45 dias),
-# ao custo de mais linhas por papel.
-MAX_VENCIMENTOS = 16
+# None -> seleciona todos os vencimentos disponíveis.
+MAX_VENCIMENTOS: Optional[int] = None
 PROCESSING_OVERLAY = "#tblListaOpc_processing"
 
 
@@ -75,6 +76,9 @@ async def scrape_all(
             wait_until="domcontentloaded",
             timeout=max(goto_timeout_ms, 1000),
         )
+        await _wait_idle(page)
+
+        await _select_all_underlyings(page)
         await _wait_idle(page)
 
         available = await _collect_symbols(page)
@@ -144,6 +148,7 @@ async def scrape_all(
                     timeout=max(goto_timeout_ms, 1000),
                 )
                 await _wait_idle(page)
+                await _select_all_underlyings(page)
             try:
                 rows = await _scrape_symbol(
                     page,
@@ -356,7 +361,7 @@ async def _scrape_symbol(
     await page.select_option(SELECT_ID_ACAO, value=symbol)
     await _wait_table_update(page, throttle_sec)
 
-    await _ensure_calls_checked(page)
+    await _ensure_all_option_types(page)
     await _wait_table_update(page, throttle_sec)
 
     await _select_last_vencimentos(page, MAX_VENCIMENTOS)
@@ -373,6 +378,37 @@ async def _scrape_symbol(
 
     rows = await _collect_table_rows(page, symbol, far_quotes=far_quotes or {})
     return rows
+
+
+async def _select_all_underlyings(page: Page) -> None:
+    """Seleciona a lista completa de ativos antes de coletar os tickers."""
+
+    select = page.locator(SELECT_ID_LISTA)
+    if not await select.count():
+        return
+
+    current = await select.input_value()
+    has_all_option = await page.locator(f'{SELECT_ID_LISTA} option[value="TA"]').count() > 0
+    if current == "TA" and has_all_option:
+        return
+
+    if has_all_option:
+        await select.select_option(value="TA")
+    else:
+        options = select.locator("option")
+        total = await options.count()
+        for idx in range(total):
+            opt = options.nth(idx)
+            text = (await opt.inner_text()).strip().lower()
+            if "todos" in text and "ativo" in text:
+                value = await opt.get_attribute("value")
+                if value:
+                    await select.select_option(value=value)
+                else:
+                    await opt.click()
+                break
+    await _wait_idle(page)
+    await page.wait_for_timeout(400)
 
 
 async def _collect_symbols(page: Page) -> List[str]:
@@ -398,17 +434,18 @@ def _filter_symbols(available: Sequence[str], requested: Optional[Sequence[str]]
     return requested_list
 
 
-async def _ensure_calls_checked(page: Page) -> None:
-    checkbox = page.locator(SELECT_CALLS_CHECKBOX)
-    if await checkbox.count() == 0:
-        # fallback: clicar no label
-        await page.locator(SELECT_CALLS_LABEL).click()
+async def _ensure_all_option_types(page: Page) -> None:
+    radio = page.locator(SELECT_ALL_TYPES_RADIO)
+    if await radio.count():
+        if not await radio.is_checked():
+            await radio.check()
         return
-    if not await checkbox.is_checked():
-        await checkbox.check()
+    label = page.locator(SELECT_ALL_TYPES_LABEL)
+    if await label.count():
+        await label.click()
 
 
-async def _select_last_vencimentos(page: Page, total: int) -> None:
+async def _select_last_vencimentos(page: Page, total: Optional[int]) -> None:
     container = page.locator(VENCIMENTOS_CONTAINER)
     await container.scroll_into_view_if_needed()
     checkboxes = page.locator(VENCIMENTOS_CHECKBOXES)
@@ -418,29 +455,31 @@ async def _select_last_vencimentos(page: Page, total: int) -> None:
     for idx in range(count):
         await checkboxes.nth(idx).set_checked(False, force=True)
 
-    indices = await checkboxes.evaluate_all(
-        """
-        (nodes, total) => {
-            const parsed = nodes.map((node, index) => {
-                const raw = node.value || node.getAttribute('value') || (node.id || '').replace(/^v/, '');
-                const time = raw ? Date.parse(raw) : Number.NaN;
-                return { index, time: Number.isNaN(time) ? null : time };
-            });
-            const withDate = parsed.filter(item => item.time !== null)
-                .sort((a, b) => a.time - b.time)
-                .map(item => item.index);
-            const fallback = parsed.map(item => item.index);
-            const order = withDate.length ? withDate : fallback;
-            if (!order.length) {
-                return [];
+    indices = list(range(count))
+    if total is not None:
+        indices = await checkboxes.evaluate_all(
+            """
+            (nodes, total) => {
+                const parsed = nodes.map((node, index) => {
+                    const raw = node.value || node.getAttribute('value') || (node.id || '').replace(/^v/, '');
+                    const time = raw ? Date.parse(raw) : Number.NaN;
+                    return { index, time: Number.isNaN(time) ? null : time };
+                });
+                const withDate = parsed.filter(item => item.time !== null)
+                    .sort((a, b) => a.time - b.time)
+                    .map(item => item.index);
+                const fallback = parsed.map(item => item.index);
+                const order = withDate.length ? withDate : fallback;
+                if (!order.length) {
+                    return [];
+                }
+                const n = Math.max(1, Math.min(total, order.length));
+                // Seleciona os vencimentos mais próximos (datas menores primeiro)
+                return order.slice(0, n);
             }
-            const n = Math.max(1, Math.min(total, order.length));
-            // Seleciona os vencimentos mais próximos (datas menores primeiro)
-            return order.slice(0, n);
-        }
-        """,
-        total,
-    )
+            """,
+            total,
+        )
 
     for idx in indices:
         await checkboxes.nth(idx).set_checked(True, force=True)
@@ -518,6 +557,7 @@ def _build_row_dict(underlying: str, cells: Sequence[str]) -> Dict[str, str]:
     record = {
         "underlying": underlying,
         "ticker": cells[0],
+        "option_type": infer_option_type(cells[0]) or "",
         "vencimento": cells[1],
         "dias_uteis": cells[2],
         "fm": cells[3],

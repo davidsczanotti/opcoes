@@ -13,6 +13,7 @@ CSV_WRITER_KWARGS = {"delimiter": CSV_DELIMITER, "lineterminator": "\n"}
 CSV_FIELDS: List[str] = [
     "underlying",
     "ticker",
+    "option_type",
     "vencimento",
     "dias_uteis",
     "fm",

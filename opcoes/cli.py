@@ -11,12 +11,13 @@ from .report import generate_report
 from .snapshot_export import export_snapshot
 from .tax import compute_tax
 from .backfill_yfinance import backfill_prices
+from .history import cleanup_history, list_decisions, record_decision, record_ranking_entries
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="opcoes",
-        description="Coletor diário de opções CALLs do opcoes.net.br",
+        description="Coletor diário de opções (CALLs/PUTs) do opcoes.net.br",
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
@@ -36,8 +37,8 @@ def parse_args() -> argparse.Namespace:
     sc.add_argument(
         "--output",
         type=Path,
-        default=Path("data/opcoes_calls_eu.csv"),
-        help="Arquivo CSV de saída (default: data/opcoes_calls_eu.csv)",
+        default=Path("data/opcoes_latest.csv"),
+        help="Arquivo CSV de saída (default: data/opcoes_latest.csv)",
     )
     sc.add_argument(
         "--headful",
@@ -108,8 +109,8 @@ def parse_args() -> argparse.Namespace:
     ec.add_argument(
         "--input",
         type=Path,
-        default=Path("data/opcoes_calls_eu.csv"),
-        help="Arquivo CSV de entrada a enriquecer (default: data/opcoes_calls_eu.csv)",
+        default=Path("data/opcoes_latest.csv"),
+        help="Arquivo CSV de entrada a enriquecer (default: data/opcoes_latest.csv)",
     )
     ec.add_argument(
         "--output",
@@ -188,6 +189,12 @@ def parse_args() -> argparse.Namespace:
     rc = sub.add_parser("report", help="Gera relatório diário pós-scrape")
     rc.add_argument("--min-score", type=int, default=8, help="Score mínimo para oportunidades (default: 8)")
     rc.add_argument("--limit", type=int, default=20, help="Quantidade máxima de oportunidades listadas")
+    rc.add_argument(
+        "--no-persist",
+        dest="persist",
+        action="store_false",
+        help="Não gravar histórico de ranking no banco (default: persiste).",
+    )
 
     sn = sub.add_parser("snapshot", help="Opera sobre snapshots diários")
     sns = sn.add_subparsers(dest="subcmd", required=True)
@@ -203,6 +210,23 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=Path("data/opcoes_latest.csv"),
         help="Arquivo CSV de saída (default: data/opcoes_latest.csv)",
+    )
+
+    dec = sub.add_parser("decision", help="Registra ou lista decisões (linha completa do snapshot)")
+    decs = dec.add_subparsers(dest="subcmd", required=True)
+    dec_add = decs.add_parser("add", help="Registra a linha do ticker do snapshot mais recente (ou data específica)")
+    dec_add.add_argument("--ticker", required=True, help="Ticker da opção (ex.: B3SAB150)")
+    dec_add.add_argument("--snapshot-date", type=str, default=None, help="Data do snapshot YYYY-MM-DD (opcional)")
+    dec_add.add_argument("--notes", type=str, default=None, help="Observações (opcional)")
+    dec_list = decs.add_parser("list", help="Lista decisões registradas")
+    dec_list.add_argument("--limit", type=int, default=50, help="Limite de linhas (default: 50)")
+
+    cl = sub.add_parser("cleanup", help="Remove rankings (e opcionalmente snapshots) antigos/vencidos")
+    cl.add_argument("--retention-days", type=int, default=180, help="Janela de retenção em dias (default: 180)")
+    cl.add_argument(
+        "--purge-snapshots",
+        action="store_true",
+        help="Também remove option/underlying snapshots antigos e vencidos (cautela!).",
     )
 
     tc = sub.add_parser("tax", help="Relatório fiscal (DARF)")
@@ -302,6 +326,17 @@ def main() -> None:
     elif args.cmd == "report":
         data = generate_report(min_score=args.min_score, limit=args.limit)
         _print_report(data)
+        if getattr(args, "persist", True):
+            record_ranking_entries(
+                data.snapshot_date,
+                categories={
+                    "top": data.opportunities,
+                    "racional": data.rational_opportunities,
+                    "loteria": data.lottery_opportunities,
+                    "teorica": data.theoretical_opportunities,
+                },
+                params={"min_score": args.min_score, "limit": args.limit},
+            )
     elif args.cmd == "snapshot":
         if args.subcmd == "export":
             try:
@@ -313,6 +348,35 @@ def main() -> None:
             except RuntimeError as exc:
                 raise SystemExit(str(exc)) from exc
             print(f"Snapshot exportado para: {out}")
+    elif args.cmd == "decision":
+        if args.subcmd == "add":
+            snap_date = None
+            if args.snapshot_date:
+                try:
+                    snap_date = _parse_trade_date(args.snapshot_date)
+                except SystemExit:
+                    raise SystemExit("Data inválida em --snapshot-date. Use o formato YYYY-MM-DD.") from None
+            decision_id = record_decision(
+                args.ticker,
+                snapshot_date=snap_date,
+                notes=args.notes,
+            )
+            if decision_id is None:
+                raise SystemExit(f"Ticker {args.ticker} não encontrado no snapshot informado.")
+            print(f"Decisão registrada com ID {decision_id}.")
+        elif args.subcmd == "list":
+            rows = list_decisions(limit=args.limit)
+            if not rows:
+                print("Nenhuma decisão registrada.")
+            else:
+                _print_decisions(rows)
+    elif args.cmd == "cleanup":
+        removed = cleanup_history(retention_days=args.retention_days, purge_snapshots=args.purge_snapshots)
+        print(
+            "Limpeza concluída: "
+            f"rankings {removed['ranking_entries']} apagados, runs {removed['ranking_runs']} apagados, "
+            f"snapshots {removed['option_snapshots']} apagados, underlyings {removed['underlying_snapshots']} apagados."
+        )
     elif args.cmd == "tax":
         summary = compute_tax(month=args.month, year=args.year)
         print(f"Relatório fiscal {summary.month:02d}/{summary.year}")
@@ -501,6 +565,28 @@ def _print_report(data) -> None:
             print(f"  - {pos['ticker']} ({pos['trade_date']}): {reasons}")
     else:
         print("\nAlertas: nenhum.")
+
+
+def _print_decisions(rows: List[dict]) -> None:
+    header = (
+        f"{'ID':>4} {'Ticker':<10} {'Snap':<10} {'Venc':<10} {'Strike':>8} "
+        f"{'Ask':>8} {'Bid':>8} {'Theo':>8} {'Score':>6} {'Notes'}"
+    )
+    print(header)
+    print("-" * len(header))
+    for r in rows:
+        print(
+            f"{r.get('id', ''):>4} "
+            f"{str(r.get('ticker') or ''):<10} "
+            f"{str(r.get('snapshot_date') or ''):<10} "
+            f"{str(r.get('vencimento') or ''):<10} "
+            f"{_format_currency(r.get('strike')):>8} "
+            f"{_format_currency(r.get('best_ask')):>8} "
+            f"{_format_currency(r.get('best_bid')):>8} "
+            f"{_format_currency(r.get('preco_teorico')):>8} "
+            f"{_format_number(r.get('score_total'), digits=2):>6} "
+            f"{str(r.get('notes') or '')}"
+        )
 
 
 if __name__ == "__main__":

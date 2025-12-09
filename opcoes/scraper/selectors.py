@@ -2,6 +2,9 @@ BASE_URL = "https://opcoes.net.br/opcoes/bovespa"
 
 # Selectors utilizados na página
 SELECT_ID_ACAO = 'select[name="IdAcao"]'
+SELECT_ID_LISTA = 'select[name="IdLista"]'
+SELECT_ALL_TYPES_RADIO = '#tpTodas'
+SELECT_ALL_TYPES_LABEL = 'label[for="tpTodas"]'
 SELECT_CALLS_CHECKBOX = '#tpCalls'
 SELECT_CALLS_LABEL = 'label[for="tpCalls"]'
 

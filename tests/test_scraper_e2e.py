@@ -68,15 +68,15 @@ async def test_select_filters(page: Page) -> None:
     await page.select_option(selectors.SELECT_ID_ACAO, value=symbol)
     await run._wait_table_update(page, THROTTLE)
 
-    await run._ensure_calls_checked(page)
+    await run._ensure_all_option_types(page)
     await run._wait_table_update(page, THROTTLE)
-    assert await page.locator(selectors.SELECT_CALLS_CHECKBOX).is_checked()
+    assert await page.locator(selectors.SELECT_ALL_TYPES_RADIO).is_checked()
 
     await run._select_last_vencimentos(page, run.MAX_VENCIMENTOS)
     await run._wait_table_update(page, THROTTLE)
     total_checks = await page.locator(selectors.VENCIMENTOS_CHECKBOXES).count()
     selected_checks = await page.locator(f"{selectors.VENCIMENTOS_CHECKBOXES}:checked").count()
-    assert selected_checks == min(run.MAX_VENCIMENTOS, total_checks)
+    assert selected_checks == total_checks
 
     await run._stretch_strike_slider(page)
     await run._wait_table_update(page, THROTTLE)
