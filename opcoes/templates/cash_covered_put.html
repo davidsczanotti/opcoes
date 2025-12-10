@@ -121,6 +121,14 @@
               </div>
               <div class="text-muted small mt-3">Tamanho do contrato</div>
               <div>{{ filters.contract_size }} ações por put</div>
+              <div class="text-muted small mt-3">Capacidade com caixa atual</div>
+              <div>
+                {% if finance.max_lots is not none and finance.max_lots > 0 %}
+                  {{ finance.max_lots }} lotes ({{ finance.max_lots * filters.contract_size }} ações)
+                {% else %}
+                  -
+                {% endif %}
+              </div>
             </div>
           </div>
         </div>

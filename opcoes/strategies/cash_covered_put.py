@@ -47,7 +47,10 @@ def _premium_from_row(row: Mapping[str, Any]) -> Tuple[Optional[float], str]:
     return None, ""
 
 
-def _calculate_portfolio_metrics() -> Dict[str, float]:
+def _calculate_portfolio_metrics(
+    spot: Optional[float],
+    contract_size: int,
+) -> Dict[str, float]:
     total_balance = finance.get_balance()
     
     # Calcula colateral travado em Puts vendidas
@@ -69,10 +72,22 @@ def _calculate_portfolio_metrics() -> Dict[str, float]:
     # Como não temos strike na tabela positions, vamos simplificar:
     # O usuário terá que confiar no saldo "Livre" que ele gerencia, ou precisamos melhorar `portfolio`.
     # Vamos deixar o cálculo de colateral para uma iteração futura onde `positions` tenha `strike`.
-    # Por hora, retornamos o saldo do Ledger.
-    
+    # Por hora, retornamos o saldo do Ledger e, se possível, a capacidade em lotes do ativo.
+
+    max_shares: Optional[int] = None
+    max_lots: Optional[int] = None
+    try:
+        if spot is not None and spot > 0 and contract_size > 0 and total_balance > 0:
+            max_shares = int(total_balance // spot)
+            max_lots = int(total_balance // (spot * contract_size))
+    except Exception:
+        max_shares = None
+        max_lots = None
+
     return {
-        "total_cash": total_balance,
+        "total_cash": float(total_balance),
+        "max_shares": max_shares,
+        "max_lots": max_lots,
         # "collateral_locked": collateral_locked,
         # "buying_power": total_balance - collateral_locked
     }
@@ -194,7 +209,14 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
             limit=limit,
         )
 
-    finance_metrics = _calculate_portfolio_metrics()
+    spot_price: Optional[float] = None
+    if quote and quote.get("price") is not None:
+        try:
+            spot_price = float(quote["price"])
+        except (TypeError, ValueError):
+            spot_price = None
+
+    finance_metrics = _calculate_portfolio_metrics(spot=spot_price, contract_size=contract_size)
     monthly_premiums = finance.get_monthly_premiums()
     transactions = finance.get_transactions(limit=10)
 
