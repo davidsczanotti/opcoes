@@ -22,6 +22,26 @@ class StrategySettings:
     recurring_days: int = 30
 
 
+@dataclass
+class CashCoveredPutSettings:
+    underlying: str = "PETR4"
+    min_yield_pct: float = 1.0
+    min_buffer_pct: float = 5.0
+    min_days: int = 7
+    max_days: int = 120
+    contract_size: int = 100
+    limit: int = 50
+
+
+@dataclass
+class CoveredCallSettings:
+    underlying: str = "CMIG4"
+    min_extrinsic: float = 2.0
+    min_days: int = 30
+    max_days: int = 200
+    min_dist_strike: float = 1.0
+
+
 def _connect() -> sqlite3.Connection:
     db_path = get_db_path()
     conn = sqlite3.connect(db_path)
@@ -97,6 +117,86 @@ def get_strategy_settings() -> StrategySettings:
     )
 
 
+def get_cash_put_settings() -> CashCoveredPutSettings:
+    conn = _connect()
+    try:
+        rows = conn.execute("SELECT key, value FROM settings").fetchall()
+    finally:
+        conn.close()
+
+    raw: Dict[str, str] = {str(r["key"]): str(r["value"]) for r in rows}
+
+    def _parse_float(name: str, default: float) -> float:
+        text = raw.get(name, "").strip()
+        if not text:
+            return default
+        text = text.replace("%", "").replace(",", ".")
+        try:
+            return float(text)
+        except ValueError:
+            return default
+
+    def _parse_int(name: str, default: int) -> int:
+        text = raw.get(name, "").strip()
+        if not text:
+            return default
+        try:
+            return int(text)
+        except ValueError:
+            return default
+
+    underlying = raw.get("cash_put_underlying", "").strip().upper() or "PETR4"
+
+    return CashCoveredPutSettings(
+        underlying=underlying,
+        min_yield_pct=_parse_float("cash_put_min_yield_pct", 1.0),
+        min_buffer_pct=_parse_float("cash_put_min_buffer_pct", 5.0),
+        min_days=_parse_int("cash_put_min_days", 7),
+        max_days=_parse_int("cash_put_max_days", 120),
+        contract_size=_parse_int("cash_put_contract_size", 100),
+        limit=_parse_int("cash_put_limit", 50),
+    )
+
+
+def get_covered_call_settings() -> CoveredCallSettings:
+    conn = _connect()
+    try:
+        rows = conn.execute("SELECT key, value FROM settings").fetchall()
+    finally:
+        conn.close()
+
+    raw: Dict[str, str] = {str(r["key"]): str(r["value"]) for r in rows}
+
+    def _parse_float(name: str, default: float) -> float:
+        text = raw.get(name, "").strip()
+        if not text:
+            return default
+        text = text.replace("%", "").replace(",", ".")
+        try:
+            return float(text)
+        except ValueError:
+            return default
+
+    def _parse_int(name: str, default: int) -> int:
+        text = raw.get(name, "").strip()
+        if not text:
+            return default
+        try:
+            return int(text)
+        except ValueError:
+            return default
+
+    underlying = raw.get("ccall_underlying", "").strip().upper() or "CMIG4"
+
+    return CoveredCallSettings(
+        underlying=underlying,
+        min_extrinsic=_parse_float("ccall_min_extrinsic", 2.0),
+        min_days=_parse_int("ccall_min_days", 30),
+        max_days=_parse_int("ccall_max_days", 200),
+        min_dist_strike=_parse_float("ccall_min_dist_strike", 1.0),
+    )
+
+
 def update_fee_settings(
     *,
     equity_fixed: float,
@@ -155,6 +255,72 @@ def update_strategy_settings(
         conn.close()
 
 
+def update_cash_put_settings(
+    *,
+    underlying: str,
+    min_yield_pct: float,
+    min_buffer_pct: float,
+    min_days: int,
+    max_days: int,
+    contract_size: int,
+    limit: int,
+) -> None:
+    conn = _connect()
+    try:
+        params = {
+            "cash_put_underlying": (underlying or "").strip().upper() or "PETR4",
+            "cash_put_min_yield_pct": float(min_yield_pct),
+            "cash_put_min_buffer_pct": float(min_buffer_pct),
+            "cash_put_min_days": int(min_days),
+            "cash_put_max_days": int(max_days),
+            "cash_put_contract_size": int(contract_size),
+            "cash_put_limit": int(limit),
+        }
+        for key, value in params.items():
+            conn.execute(
+                """
+                INSERT INTO settings (key, value)
+                VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (key, str(value)),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def update_covered_call_settings(
+    *,
+    underlying: str,
+    min_extrinsic: float,
+    min_days: int,
+    max_days: int,
+    min_dist_strike: float,
+) -> None:
+    conn = _connect()
+    try:
+        params = {
+            "ccall_underlying": (underlying or "").strip().upper() or "CMIG4",
+            "ccall_min_extrinsic": float(min_extrinsic),
+            "ccall_min_days": int(min_days),
+            "ccall_max_days": int(max_days),
+            "ccall_min_dist_strike": float(min_dist_strike),
+        }
+        for key, value in params.items():
+            conn.execute(
+                """
+                INSERT INTO settings (key, value)
+                VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (key, str(value)),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 __all__ = [
     "FeeSettings",
     "get_fee_settings",
@@ -162,4 +328,10 @@ __all__ = [
     "StrategySettings",
     "get_strategy_settings",
     "update_strategy_settings",
+    "CashCoveredPutSettings",
+    "get_cash_put_settings",
+    "update_cash_put_settings",
+    "CoveredCallSettings",
+    "get_covered_call_settings",
+    "update_covered_call_settings",
 ]

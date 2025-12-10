@@ -120,7 +120,13 @@ def add_position(
     return int(pos_id)
 
 
-def close_position(*, position_id: int, exit_date: str, exit_price: float) -> None:
+def close_position(
+    *,
+    position_id: int,
+    exit_date: str,
+    exit_price: float,
+    exit_reason: Optional[str] = None,
+) -> None:
     conn = _connect()
     cur = conn.cursor()
     cur.execute(
@@ -128,10 +134,11 @@ def close_position(*, position_id: int, exit_date: str, exit_price: float) -> No
         UPDATE positions
         SET status = 'closed',
             exit_date = ?,
-            exit_price = ?
+            exit_price = ?,
+            exit_reason = COALESCE(?, exit_reason)
         WHERE id = ? AND status = 'open'
         """,
-        (exit_date, float(exit_price), int(position_id)),
+        (exit_date, float(exit_price), exit_reason, int(position_id)),
     )
     if cur.rowcount == 0:
         conn.close()

@@ -1,17 +1,25 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Dict, List, Mapping, Tuple
 
 from ..portfolio import list_positions
 from ..snapshot_repository import fetch_latest_underlying_options, fetch_latest_underlying_quote
 from ..scraper.storage import _parse_ptbr_number
+from ..settings import get_covered_call_settings, update_covered_call_settings
 
 
 def _get_int_arg(args: Mapping[str, Any], name: str, default: int) -> int:
     try:
         raw = args.get(name, default)
         return int(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def _get_float_arg(args: Mapping[str, Any], name: str, default: float) -> float:
+    try:
+        raw = args.get(name, default)
+        return float(raw)
     except (TypeError, ValueError):
         return default
 
@@ -309,11 +317,13 @@ def calculate_covered_call_strategy(
 
 
 def get_covered_call_context(args: Mapping[str, Any]) -> Dict[str, Any]:
-    underlying = (args.get("underlying", "CMIG4") or "CMIG4").strip().upper()
-    min_extrinsic = float(args.get("min_extrinsic", 2.0) or 0.0)
-    min_days = _get_int_arg(args, "min_days", 30)
-    max_days = _get_int_arg(args, "max_days", 200)
-    min_dist_strike = float(args.get("min_dist_strike", 1.0) or 0.0)
+    defaults = get_covered_call_settings()
+
+    underlying = (args.get("underlying") or defaults.underlying).strip().upper()
+    min_extrinsic = _get_float_arg(args, "min_extrinsic", defaults.min_extrinsic)
+    min_days = _get_int_arg(args, "min_days", defaults.min_days)
+    max_days = _get_int_arg(args, "max_days", defaults.max_days)
+    min_dist_strike = _get_float_arg(args, "min_dist_strike", defaults.min_dist_strike)
 
     # IO / Data Fetching
     positions_open = list_positions(include_closed=False)
@@ -321,8 +331,16 @@ def get_covered_call_context(args: Mapping[str, Any]) -> Dict[str, Any]:
     options_rows = fetch_latest_underlying_options(underlying=underlying)
     quote = fetch_latest_underlying_quote(underlying)
 
-    # Pure Logic Delegation
-    return calculate_covered_call_strategy(
+    if args:
+        update_covered_call_settings(
+            underlying=underlying,
+            min_extrinsic=min_extrinsic,
+            min_days=min_days,
+            max_days=max_days,
+            min_dist_strike=min_dist_strike,
+        )
+
+    ctx = calculate_covered_call_strategy(
         underlying=underlying,
         positions_open=positions_open,
         options_rows=options_rows,
@@ -332,3 +350,11 @@ def get_covered_call_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         max_days=max_days,
         min_dist_strike=min_dist_strike,
     )
+
+    ctx["filters"] = {
+        "min_extrinsic": min_extrinsic,
+        "min_days": min_days,
+        "max_days": max_days,
+        "min_dist_strike": min_dist_strike,
+    }
+    return ctx

@@ -26,6 +26,54 @@
     <div class="container">
       <h1 class="h4 mb-3">Covered Call – {{ underlying }}</h1>
 
+      <form class="row g-2 mb-4" method="get" action="/covered-call">
+        <div class="col-sm-2">
+          <label class="form-label">Ativo</label>
+          <input name="underlying" class="form-control form-control-sm" value="{{ underlying }}">
+        </div>
+        <div class="col-sm-2">
+          <label class="form-label">Extrínseco mínimo (%)</label>
+          <input
+            type="number"
+            step="0.1"
+            name="min_extrinsic"
+            class="form-control form-control-sm"
+            value="{{ filters.min_extrinsic }}"
+          >
+        </div>
+        <div class="col-sm-2">
+          <label class="form-label">Dias úteis (min)</label>
+          <input
+            type="number"
+            name="min_days"
+            class="form-control form-control-sm"
+            value="{{ filters.min_days }}"
+          >
+        </div>
+        <div class="col-sm-2">
+          <label class="form-label">Dias úteis (máx)</label>
+          <input
+            type="number"
+            name="max_days"
+            class="form-control form-control-sm"
+            value="{{ filters.max_days }}"
+          >
+        </div>
+        <div class="col-sm-2">
+          <label class="form-label">Dist. strike mín. (%)</label>
+          <input
+            type="number"
+            step="0.1"
+            name="min_dist_strike"
+            class="form-control form-control-sm"
+            value="{{ filters.min_dist_strike }}"
+          >
+        </div>
+        <div class="col-sm-2 d-flex align-items-end justify-content-end">
+          <button class="btn btn-primary btn-sm" type="submit">Aplicar</button>
+        </div>
+      </form>
+
       <div class="row mb-4">
         <div class="col-md-4 mb-3 mb-md-0">
           <div class="card">

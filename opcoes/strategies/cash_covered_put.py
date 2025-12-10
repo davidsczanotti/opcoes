@@ -7,6 +7,7 @@ from ..scraper.storage import _parse_ptbr_number
 from ..utils import infer_option_type
 from .. import finance
 from ..portfolio import list_positions
+from ..settings import get_cash_put_settings, update_cash_put_settings
 
 
 def _get_int_arg(args: Mapping[str, Any], name: str, default: int) -> int:
@@ -160,13 +161,15 @@ def _build_put_suggestions(
 
 
 def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
-    underlying = (args.get("underlying", "PETR4") or "PETR4").strip().upper()
-    min_yield_pct = _get_float_arg(args, "min_yield_pct", 1.0)
-    min_buffer_pct = _get_float_arg(args, "min_buffer_pct", 5.0)
-    min_days = _get_int_arg(args, "min_days", 7)
-    max_days = _get_int_arg(args, "max_days", 120)
-    contract_size = max(_get_int_arg(args, "contract_size", 100), 1)
-    limit = _get_int_arg(args, "limit", 50)
+    defaults = get_cash_put_settings()
+
+    underlying = (args.get("underlying") or defaults.underlying).strip().upper()
+    min_yield_pct = _get_float_arg(args, "min_yield_pct", defaults.min_yield_pct)
+    min_buffer_pct = _get_float_arg(args, "min_buffer_pct", defaults.min_buffer_pct)
+    min_days = _get_int_arg(args, "min_days", defaults.min_days)
+    max_days = _get_int_arg(args, "max_days", defaults.max_days)
+    contract_size = max(_get_int_arg(args, "contract_size", defaults.contract_size), 1)
+    limit = _get_int_arg(args, "limit", defaults.limit)
 
     rows = fetch_latest_underlying_options(underlying=underlying)
     suggestions = _build_put_suggestions(
@@ -179,7 +182,18 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         limit=limit,
     )
     quote = fetch_latest_underlying_quote(underlying)
-    
+
+    if args:
+        update_cash_put_settings(
+            underlying=underlying,
+            min_yield_pct=min_yield_pct,
+            min_buffer_pct=min_buffer_pct,
+            min_days=min_days,
+            max_days=max_days,
+            contract_size=contract_size,
+            limit=limit,
+        )
+
     finance_metrics = _calculate_portfolio_metrics()
     monthly_premiums = finance.get_monthly_premiums()
     transactions = finance.get_transactions(limit=10)
