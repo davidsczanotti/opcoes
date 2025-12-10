@@ -61,6 +61,44 @@
       </form>
 
       <div class="row mb-4">
+        <!-- Dashboard Financeiro -->
+        <div class="col-md-4 mb-3 mb-md-0">
+          <div class="card h-100 border-primary">
+            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+              <span>Caixa Disponível</span>
+              <button class="btn btn-sm btn-light text-primary py-0" data-bs-toggle="modal" data-bs-target="#modalAddFunds">
+                + Movimentar
+              </button>
+            </div>
+            <div class="card-body text-center">
+              <h2 class="display-6 fw-bold text-primary mb-0">R$ {{ "%.2f"|format(finance.total_cash) }}</h2>
+              <div class="text-muted small mt-2">Saldo em conta + prêmios acumulados</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Prêmios Mensais -->
+        <div class="col-md-4 mb-3 mb-md-0">
+          <div class="card h-100">
+            <div class="card-header">Prêmios Recebidos (Últimos Meses)</div>
+            <div class="card-body p-0">
+              <ul class="list-group list-group-flush small">
+                {% if monthly_premiums %}
+                  {% for m in monthly_premiums %}
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                      <span>{{ m.month }}</span>
+                      <span class="fw-bold text-success">+ R$ {{ "%.2f"|format(m.total) }}</span>
+                    </li>
+                  {% endfor %}
+                {% else %}
+                  <li class="list-group-item text-center text-muted">Sem registros de prêmios.</li>
+                {% endif %}
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- Cotação -->
         <div class="col-md-4 mb-3 mb-md-0">
           <div class="card h-100">
             <div class="card-header">Cotação {{ underlying }}</div>
@@ -86,16 +124,18 @@
             </div>
           </div>
         </div>
-        <div class="col-md-8">
-          <div class="card h-100">
-            <div class="card-header">Top da lista</div>
+      </div>
+      
+      <!-- Top da Lista (Best Candidate) - Agora abaixo do dashboard -->
+      <div class="card mb-4">
+            <div class="card-header">Top da lista (Melhor Oportunidade)</div>
             <div class="card-body">
               {% if suggestions %}
                 {% set best = suggestions[0] %}
                 <div class="d-flex flex-wrap justify-content-between align-items-center">
                   <div>
                     <div class="text-muted small">Ticker</div>
-                    <div class="fs-5">{{ best.ticker }}</div>
+                    <div class="fs-5 fw-bold text-success">{{ best.ticker }}</div>
                     <div class="text-muted small">Vencimento: {{ best.vencimento }} ({{ best.dias_uteis }} d.u.)</div>
                   </div>
                   <div class="text-end">
@@ -118,8 +158,6 @@
                 <p class="text-muted mb-0">Nenhum candidato encontrado com os filtros atuais.</p>
               {% endif %}
             </div>
-          </div>
-        </div>
       </div>
 
       <h2 class="h5 mt-3">Puts elegíveis</h2>
@@ -206,5 +244,48 @@
         </div>
       {% endif %}
     </div>
+
+    <!-- Modal: Movimentar Caixa -->
+    <div class="modal fade" id="modalAddFunds" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog">
+        <form class="modal-content" action="/finance/add" method="post">
+          <div class="modal-header">
+            <h5 class="modal-title">Movimentar Caixa</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <div class="mb-3">
+              <label class="form-label">Tipo</label>
+              <select name="type" class="form-select">
+                <option value="DEPOSIT">Depósito (Aporte)</option>
+                <option value="WITHDRAW">Retirada (Saque)</option>
+              </select>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Valor (R$)</label>
+              <input type="number" step="0.01" name="amount" class="form-control" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Data</label>
+              <input type="date" name="date" class="form-control" value="">
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Descrição</label>
+              <input type="text" name="description" class="form-control" placeholder="Opcional">
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+            <button type="submit" class="btn btn-primary">Salvar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+      // Preencher data atual no modal
+      document.querySelector('input[name="date"]').valueAsDate = new Date();
+    </script>
   </body>
 </html>

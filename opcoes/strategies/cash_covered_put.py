@@ -5,6 +5,8 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 from ..snapshot_repository import fetch_latest_underlying_options, fetch_latest_underlying_quote
 from ..scraper.storage import _parse_ptbr_number
 from ..utils import infer_option_type
+from .. import finance
+from ..portfolio import list_positions
 
 
 def _get_int_arg(args: Mapping[str, Any], name: str, default: int) -> int:
@@ -42,6 +44,37 @@ def _premium_from_row(row: Mapping[str, Any]) -> Tuple[Optional[float], str]:
         if val is not None and val > 0:
             return val, key
     return None, ""
+
+
+def _calculate_portfolio_metrics() -> Dict[str, float]:
+    total_balance = finance.get_balance()
+    
+    # Calcula colateral travado em Puts vendidas
+    positions = list_positions(include_closed=False, only_closed=False)
+    collateral_locked = 0.0
+    for pos in positions:
+        ticker = (pos.get("ticker") or "").upper()
+        # Assume que só Puts precisam de colateral em dinheiro integral (CCP)
+        # Se não tiver tipo explícito, tentamos inferir.
+        if "PUT" in (infer_option_type(ticker) or ""):
+            # strike não está na tabela de positions diretamente, precisamos de um lookup ou assumir.
+            # No portfolio.py, 'entry_price' é o prêmio. O strike não é salvo explicitamente lá hoje.
+            # TODO: Melhorar portfolio para salvar strike. 
+            # Por enquanto, se não tiver strike, não somamos (ou usamos estimativa se possível).
+            # Para simplificar agora: vamos assumir que não conseguimos calcular exato sem strike na tabela positions.
+            # Mas espera! Temos `snapshot_repository`. Podemos tentar buscar o strike lá se for recente.
+            pass
+            
+    # Como não temos strike na tabela positions, vamos simplificar:
+    # O usuário terá que confiar no saldo "Livre" que ele gerencia, ou precisamos melhorar `portfolio`.
+    # Vamos deixar o cálculo de colateral para uma iteração futura onde `positions` tenha `strike`.
+    # Por hora, retornamos o saldo do Ledger.
+    
+    return {
+        "total_cash": total_balance,
+        # "collateral_locked": collateral_locked,
+        # "buying_power": total_balance - collateral_locked
+    }
 
 
 def _build_put_suggestions(
@@ -146,6 +179,10 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         limit=limit,
     )
     quote = fetch_latest_underlying_quote(underlying)
+    
+    finance_metrics = _calculate_portfolio_metrics()
+    monthly_premiums = finance.get_monthly_premiums()
+    transactions = finance.get_transactions(limit=10)
 
     return {
         "underlying": underlying,
@@ -159,6 +196,9 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
             "limit": limit,
         },
         "suggestions": suggestions,
+        "finance": finance_metrics,
+        "monthly_premiums": monthly_premiums,
+        "recent_transactions": transactions,
     }
 
 

@@ -171,6 +171,7 @@ def _fetch_opportunities(
         SELECT
             ticker,
             underlying,
+            option_type,
             "score_total",
             "trend_flag",
             "underlying_price_date",
@@ -225,6 +226,7 @@ def _row_to_dict(row: sqlite3.Row) -> Dict[str, object]:
     return {
         "ticker": row["ticker"],
         "underlying": row["underlying"],
+        "option_type": (row["option_type"] or "").strip().upper(),
         "score_total": _parse_decimal(row["score_total"]),
         "trend_flag": row["trend_flag"],
         "underlying_price_date": row["underlying_price_date"],
@@ -330,6 +332,7 @@ def _fetch_recurring_opportunities(
             SELECT
                 ticker,
                 MAX(underlying) AS underlying,
+                MAX(option_type) AS option_type,
                 COUNT(*) AS hits,
                 MIN(snapshot_date) AS first_seen,
                 MAX(snapshot_date) AS last_seen
@@ -339,6 +342,7 @@ def _fetch_recurring_opportunities(
         SELECT
             agg.ticker,
             agg.underlying,
+            agg.option_type,
             agg.hits,
             agg.first_seen,
             agg.last_seen,
@@ -360,6 +364,7 @@ def _fetch_recurring_opportunities(
             {
                 "ticker": row["ticker"],
                 "underlying": row["underlying"],
+                "option_type": (row["option_type"] or "").strip().upper() if "option_type" in row.keys() else "",
                 "hits": hits,
                 "presence_pct": (hits / snapshot_days * 100.0) if snapshot_days else None,
                 "first_seen": row["first_seen"],

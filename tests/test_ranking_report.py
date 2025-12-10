@@ -41,6 +41,7 @@ def _setup_db(db_path: str) -> float:
             snapshot_date TEXT NOT NULL,
             ticker TEXT,
             underlying TEXT,
+            option_type TEXT,
             "score_total" TEXT,
             "trend_flag" TEXT,
             "underlying_price_date" TEXT,
@@ -197,3 +198,16 @@ def test_generate_report_computes_iv_and_recurring(monkeypatch, tmp_path, hv_day
     # Segmentação: WEGEF425 é ITM, então cai em "carteira" no contexto de ranking.
     ctx = get_ranking_context({})
     assert any(o["ticker"] == "WEGEF425" for o in ctx["segments"]["carteira"])
+
+
+def test_ranking_context_filters_by_option_type(monkeypatch, tmp_path) -> None:
+    db_path = tmp_path / "opcoes.db"
+    monkeypatch.setenv("OPCOES_DB_PATH", str(db_path))
+    _setup_db(str(db_path))
+
+    ctx_calls = get_ranking_context({"option_type": "CALL"})
+    assert ctx_calls["data"].theoretical_opportunities  # WEGEF425 é CALL
+
+    ctx_puts = get_ranking_context({"option_type": "PUT"})
+    assert not ctx_puts["data"].opportunities
+    assert not ctx_puts["data"].theoretical_opportunities

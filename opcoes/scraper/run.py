@@ -39,6 +39,8 @@ from .activity import FlowStore
 from .snapshots import SnapshotDB
 from .far_expirations import fetch_far_expiration_quotes
 from ..utils import infer_option_type
+from .. import quant
+from .health import check_health
 
 
 # Número de vencimentos a selecionar no filtro da tela.
@@ -77,6 +79,9 @@ async def scrape_all(
             timeout=max(goto_timeout_ms, 1000),
         )
         await _wait_idle(page)
+
+        # Health Check antes de prosseguir
+        await check_health(page)
 
         await _select_all_underlyings(page)
         await _wait_idle(page)
@@ -231,105 +236,142 @@ async def scrape_all(
                     if spread_pct is not None:
                         r["spread_pct"] = _format_decimal(spread_pct, decimals=2, signed=False)
                     price_buy = _price_for_buy(r, spot_price=price_info.price)
-                    distorcao_pct = _distorcao_preco(price_buy, theo_price)
+                    
+                    distorcao_pct = None
+                    if price_buy is not None and theo_price is not None:
+                        distorcao_pct = quant.calculate_price_distortion(price_buy, theo_price)
                     if distorcao_pct is not None:
                         r["distorcao_preco_pct"] = _format_decimal(distorcao_pct, decimals=2, signed=False)
                         if abs(distorcao_pct) > 10.0:
                             r["distorcao_flag"] = "1"
-                    prob_itm = _prob_itm(price_info.price, r)
+                    
+                    vol = _parse_float(r.get("vol_impl_perc"))
+                    days = _parse_float(r.get("dias_uteis"))
+                    strike = _parse_float(r.get("strike"))
+                    
+                    prob_itm = None
+                    if strike and vol and days:
+                        prob_itm = quant.calculate_probability_itm(price_info.price, strike, vol, days)
                     if prob_itm is not None:
                         r["prob_itm_pct"] = _format_decimal(prob_itm * 100.0, decimals=1, signed=False)
+                    
                     pct_to_double = _parse_float(r.get("%_Alta_p_2x"))
-                    prob_2x = _prob_move(price_info.price, pct_to_double, r)
+                    prob_2x = None
+                    if pct_to_double and vol and days:
+                        prob_2x = quant.calculate_probability_move(price_info.price, pct_to_double, vol, days)
                     if prob_2x is not None:
                         r["prob_2x_pct"] = _format_decimal(prob_2x * 100.0, decimals=1, signed=False)
-                    cost_pct = _cost_pct(row=r, spot_price=price_info.price)
+                    
+                    cost_pct = None
+                    if price_buy is not None:
+                        cost_pct = quant.calculate_cost_pct(price_buy, price_info.price)
                     r["custo_pct"] = _format_decimal(cost_pct, decimals=2, signed=False) if cost_pct is not None else ""
-                    intrinsic, extrinsic = _intrinsic_extrinsic(row=r, spot_price=price_info.price)
+                    
+                    intrinsic, extrinsic = None, None
+                    if price_buy is not None and strike is not None:
+                        intrinsic, extrinsic = quant.calculate_intrinsic_extrinsic(price_buy, strike, price_info.price)
                     r["intrinsic_value"] = _format_decimal(intrinsic, decimals=2, signed=False) if intrinsic is not None else ""
                     r["extrinsic_value"] = _format_decimal(extrinsic, decimals=2, signed=False) if extrinsic is not None else ""
-                    extrinsic_pct = _extrinsic_pct_spot(extrinsic, spot_price=price_info.price)
+                    
+                    extrinsic_pct = None
+                    if extrinsic is not None:
+                        extrinsic_pct = quant.calculate_extrinsic_pct(extrinsic, price_info.price)
                     r["extrinsic_pct_spot"] = _format_decimal(extrinsic_pct, decimals=2, signed=False) if extrinsic_pct is not None else ""
-                    be_price, be_dist = _breakeven(price_info.price, r)
+                    
+                    be_price, be_dist = None, None
+                    if strike is not None and price_buy is not None:
+                        be_price, be_dist = quant.calculate_breakeven(price_info.price, strike, price_buy)
                     if be_price is not None:
                         r["breakeven_price"] = _format_decimal(be_price, decimals=2, signed=False)
                     if be_dist is not None:
                         r["breakeven_dist_pct"] = _format_decimal(be_dist, decimals=2, signed=False)
-                    status_remoto = _classify_remote(r)
+                    
+                    status_remoto = quant.classify_remote_bet(prob_itm * 100.0 if prob_itm is not None else None, extrinsic_pct, days)
                     r["Status_Remoto"] = status_remoto
             else:
-                for r in rows:
-                    r["custo_pct"] = ""
-                    r["intrinsic_value"] = ""
-                    r["extrinsic_value"] = ""
-                    r["extrinsic_pct_spot"] = ""
-                    r["breakeven_price"] = ""
-                    r["breakeven_dist_pct"] = ""
-                    r["prob_itm_pct"] = ""
-                    r["prob_2x_pct"] = ""
-                    r["Status_Remoto"] = ""
-
-            iv_summary = _summarize_iv(rows)
-            iv_ranks: Dict[Tuple[str, str], Optional[float]] = {}
-            if iv_store and iv_summary:
-                entries = [
-                    (key_underlying, key_venc, snapshot_date, value)
-                    for (key_underlying, key_venc), value in iv_summary.items()
-                    if value is not None
-                ]
-                iv_store.record_many(entries)
-                for (key_underlying, key_venc), value in iv_summary.items():
-                    if value is None:
-                        continue
-                    rank = iv_store.rank_for(key_underlying, key_venc, snapshot_date, value)
-                    iv_ranks[(key_underlying, key_venc)] = rank
-
-            flow_records: List[Tuple[str, str, Optional[float], Optional[float]]] = []
-            flow_ratios: Dict[str, Tuple[Optional[float], Optional[float]]] = {}
-            if flow_store:
-                for r in rows:
-                    ticker = _normalize_ticker(r.get("ticker"))
-                    if not ticker:
-                        continue
-                    vol = _parse_float(r.get("vol_financeiro"))
-                    num = _parse_float(r.get("num_neg"))
-                    if vol is None and num is None:
-                        continue
-                    avg_vol, avg_num = flow_store.averages(ticker, snapshot_date)
-                    ratio_vol = vol / avg_vol if avg_vol and vol is not None and avg_vol > 0 else None
-                    ratio_num = num / avg_num if avg_num and num is not None and avg_num > 0 else None
-                    flow_ratios[ticker] = (ratio_vol, ratio_num)
-                    flow_records.append((ticker, snapshot_date, vol, num))
-                flow_store.record_many(flow_records)
-
-            for r in rows:
-                ticker_key = _normalize_ticker(r.get("ticker"))
-                ratios = flow_ratios.get(ticker_key)
-                if ratios:
-                    vol_ratio, num_ratio = ratios
-                    r["vol_fluxo_5d"] = _format_decimal(vol_ratio, decimals=2, signed=False) if vol_ratio is not None else ""
-                    r["num_fluxo_5d"] = _format_decimal(num_ratio, decimals=2, signed=False) if num_ratio is not None else ""
-                else:
-                    r["vol_fluxo_5d"] = ""
-                    r["num_fluxo_5d"] = ""
-
-            for r in rows:
-                key = (_normalize_underlying(r.get("underlying")), r.get("vencimento", ""))
-                rank = iv_ranks.get(key)
-                base_total = _parse_float(r.get("score_total")) or 0.0
-                iv_pts = 0.0
-                if rank is not None:
-                    rank_str = _format_decimal(rank, decimals=1, signed=False)
-                    iv_pts = _score_iv(rank, _parse_float(r.get("vol_impl_perc")))
-                    r["iv_rank_180d"] = rank_str
-                    r["iv_score"] = _format_decimal(iv_pts, decimals=2, signed=False)
-                else:
-                    r["iv_rank_180d"] = ""
-                    r["iv_score"] = ""
-                final_score = _weighted_score(r, iv_pts)
-                r["score_total"] = _format_decimal(final_score, decimals=2, signed=False)
-                _apply_penalties(r)
-
+                            for r in rows:
+                                r["custo_pct"] = ""
+                                r["intrinsic_value"] = ""
+                                r["extrinsic_value"] = ""
+                                r["extrinsic_pct_spot"] = ""
+                                r["breakeven_price"] = ""
+                                r["breakeven_dist_pct"] = ""
+                                r["prob_itm_pct"] = ""
+                                r["prob_2x_pct"] = ""
+                                r["Status_Remoto"] = ""
+                
+                            iv_summary = _summarize_iv(rows)
+                            iv_ranks: Dict[Tuple[str, str], Optional[float]] = {}
+                            if iv_store and iv_summary:
+                                entries = [
+                                    (key_underlying, key_venc, snapshot_date, value)
+                                    for (key_underlying, key_venc), value in iv_summary.items()
+                                    if value is not None
+                                ]
+                                iv_store.record_many(entries)
+                                for (key_underlying, key_venc), value in iv_summary.items():
+                                    if value is None:
+                                        continue
+                                    rank = iv_store.rank_for(key_underlying, key_venc, snapshot_date, value)
+                                    iv_ranks[(key_underlying, key_venc)] = rank
+                
+                            flow_records: List[Tuple[str, str, Optional[float], Optional[float]]] = []
+                            flow_ratios: Dict[str, Tuple[Optional[float], Optional[float]]] = {}
+                            if flow_store:
+                                for r in rows:
+                                    ticker = _normalize_ticker(r.get("ticker"))
+                                    if not ticker:
+                                        continue
+                                    vol = _parse_float(r.get("vol_financeiro"))
+                                    num = _parse_float(r.get("num_neg"))
+                                    if vol is None and num is None:
+                                        continue
+                                    avg_vol, avg_num = flow_store.averages(ticker, snapshot_date)
+                                    ratio_vol = vol / avg_vol if avg_vol and vol is not None and avg_vol > 0 else None
+                                    ratio_num = num / avg_num if avg_num and num is not None and avg_num > 0 else None
+                                    flow_ratios[ticker] = (ratio_vol, ratio_num)
+                                    flow_records.append((ticker, snapshot_date, vol, num))
+                                flow_store.record_many(flow_records)
+                
+                            for r in rows:
+                                ticker_key = _normalize_ticker(r.get("ticker"))
+                                ratios = flow_ratios.get(ticker_key)
+                                if ratios:
+                                    vol_ratio, num_ratio = ratios
+                                    r["vol_fluxo_5d"] = _format_decimal(vol_ratio, decimals=2, signed=False) if vol_ratio is not None else ""
+                                    r["num_fluxo_5d"] = _format_decimal(num_ratio, decimals=2, signed=False) if num_ratio is not None else ""
+                                else:
+                                    r["vol_fluxo_5d"] = ""
+                                    r["num_fluxo_5d"] = ""
+                
+                            for r in rows:
+                                key = (_normalize_underlying(r.get("underlying")), r.get("vencimento", ""))
+                                rank = iv_ranks.get(key)
+                                iv_pts = 0.0
+                                if rank is not None:
+                                    rank_str = _format_decimal(rank, decimals=1, signed=False)
+                                    iv_pts = quant.score_iv_rank(rank, _parse_float(r.get("vol_impl_perc")))
+                                    r["iv_rank_180d"] = rank_str
+                                    r["iv_score"] = _format_decimal(iv_pts, decimals=2, signed=False)
+                                else:
+                                    r["iv_rank_180d"] = ""
+                                    r["iv_score"] = ""
+                                
+                                final_score = quant.calculate_weighted_score(
+                                    moneyness_score=_parse_float(r.get("moneyness_score")) or 0.0,
+                                    prob_itm_pct=_parse_float(r.get("prob_itm_pct")),
+                                    prob_itm_delta_pct=_parse_float(r.get("prob_itm_delta_pct")),
+                                    extrinsic_pct_spot=_parse_float(r.get("extrinsic_pct_spot")),
+                                    liquidity_score=_parse_float(r.get("liquidez_score")) or 0.0,
+                                    iv_score=iv_pts,
+                                    theta_score=_parse_float(r.get("theta_score")) or 0.0,
+                                    em2x_score=_parse_float(r.get("em2x_score")) or 0.0,
+                                    double_score=_parse_float(r.get("dobro_score")) or 0.0,
+                                    status_remote=r.get("Status_Remoto") or ""
+                                )
+                                r["score_total"] = _format_decimal(final_score, decimals=2, signed=False)
+                                _apply_penalties(r)
+                
             snapshot_rows.extend(rows)
             written = append_rows_dedup(output_csv, rows, existing_tickers)
             total_written += written
@@ -554,34 +596,51 @@ async def _collect_table_rows(page: Page, underlying: str, far_quotes: Dict[str,
 
 
 def _build_row_dict(underlying: str, cells: Sequence[str]) -> Dict[str, str]:
+    """Mapeia células da tabela para o dict interno.
+
+    Quando habilitamos CALLs e PUTs, a tabela ganha uma coluna extra (Tipo)
+    após Dias Úteis. Detectamos essa coluna e ajustamos o deslocamento.
+    """
+
+    option_type_cell = ""
+    shift = 0
+    if len(cells) >= 6:
+        maybe_type = (cells[3] or "").strip().upper()
+        if maybe_type in {"CALL", "PUT", "CALLS", "PUTS"}:
+            option_type_cell = maybe_type
+            shift = 1
+
+    def col(idx: int) -> str:
+        return cells[idx + shift] if idx + shift < len(cells) else ""
+
     record = {
         "underlying": underlying,
         "ticker": cells[0],
-        "option_type": infer_option_type(cells[0]) or "",
+        "option_type": option_type_cell or infer_option_type(cells[0]) or "",
         "vencimento": cells[1],
         "dias_uteis": cells[2],
-        "fm": cells[3],
-        "mod": cells[4],
-        "strike": cells[5],
-        "ai_otm": cells[6],
-        "dist_perc_strike": cells[7],
-        "ultimo": cells[8],
-        "var_perc": cells[9],
-        "data_hora": cells[10],
-        "num_neg": cells[11],
-        "vol_financeiro": cells[12],
-        "vol_impl_perc": cells[13],
-        "delta": cells[14],
-        "gamma": cells[15],
-        "theta_dolar": cells[16],
-        "theta_perc": cells[17],
-        "vega": cells[18],
-        "iq": cells[19],
-        "coberto": cells[20],
-        "travado": cells[21],
-        "descoberto": cells[22],
-        "titulares": cells[23],
-        "lancadores": cells[24],
+        "fm": col(3),
+        "mod": col(4),
+        "strike": col(5),
+        "ai_otm": col(6),
+        "dist_perc_strike": col(7),
+        "ultimo": col(8),
+        "var_perc": col(9),
+        "data_hora": col(10),
+        "num_neg": col(11),
+        "vol_financeiro": col(12),
+        "vol_impl_perc": col(13),
+        "delta": col(14),
+        "gamma": col(15),
+        "theta_dolar": col(16),
+        "theta_perc": col(17),
+        "vega": col(18),
+        "iq": col(19),
+        "coberto": col(20),
+        "travado": col(21),
+        "descoberto": col(22),
+        "titulares": col(23),
+        "lancadores": col(24),
         # Reservados para best bid/ask; ficarão vazios se a tabela não expor
         "best_bid": "",
         "best_ask": "",
@@ -775,47 +834,63 @@ async def _wait_idle(page: Page) -> None:
 
 
 def _apply_status_indicators(row: Dict[str, str]) -> None:
-    status_m = _status_moneyness(row)
+    dist = _parse_float(row.get("dist_perc_strike"))
+    status_m = quant.determine_moneyness_status(row.get("ai_otm") or "", dist)
     row["Status_Moneyness"] = status_m
+
     pct_alta, status_2x = _double_scenario(row)
     row["%_Alta_p_2x"] = _format_decimal(pct_alta, decimals=1, signed=False)
     row["Status_2x"] = status_2x
+    
     status_liq = _status_liquidez(row)
     row["Status_Liquidez"] = status_liq
-    dist = _parse_float(row.get("dist_perc_strike"))
-    theta_val = _parse_float(row.get("theta_perc"))
+    
     status_theta = _status_theta(row)
     row["Status_Theta"] = status_theta
-
-    m_score = _score_moneyness(dist)
-    l_score = _score_liquidez(row, status_liq)
-    d_score = _score_dobro(status_2x)
-    t_score = _score_theta(theta_val)
-    delta_score = _score_delta_prob(_parse_float(row.get("delta")))
-    extr_score = _score_extrinsic(_parse_float(row.get("extrinsic_pct_spot")))
-    em_sigma, em_ratio = _em_movement(row)
+    
+    m_score = quant.score_moneyness(dist)
+    l_score = quant.score_liquidity(_parse_float(row.get("num_neg")) or 0.0, _parse_float(row.get("vol_financeiro")) or 0.0, status_liq)
+    d_score = quant.score_double_scenario(status_2x)
+    t_score = quant.score_theta(_parse_float(row.get("theta_perc")))
+    
+    vol = _parse_float(row.get("vol_impl_perc")) or 0.0
+    days = _parse_float(row.get("dias_uteis")) or 0.0
+    em_sigma, em_ratio = quant.calculate_em_movement(vol, days, pct_alta)
     row["em_1sigma_pct"] = _format_decimal(em_sigma, decimals=1, signed=False)
     row["relacao_em_2x"] = _format_decimal(em_ratio, decimals=2, signed=False)
-    em_score = _score_em_ratio(em_ratio)
+    em_score = quant.score_em_ratio(em_ratio)
+
     row["em2x_score"] = str(em_score)
     row["moneyness_score"] = _format_decimal(m_score, decimals=2, signed=False)
     row["liquidez_score"] = _format_decimal(l_score, decimals=2, signed=False)
     row["dobro_score"] = str(d_score)
     row["theta_score"] = _format_decimal(t_score, decimals=2, signed=False)
+    
     delta_val = _parse_float(row.get("delta"))
     if delta_val is not None:
         prob_delta = abs(delta_val) * 100.0
         row["prob_itm_delta_pct"] = _format_decimal(prob_delta, decimals=1, signed=False)
     else:
         row["prob_itm_delta_pct"] = ""
-    base_score = m_score + l_score + d_score + t_score + em_score + delta_score + extr_score
+
+    base_score = quant.calculate_weighted_score(
+        moneyness_score=m_score,
+        prob_itm_pct=_parse_float(row.get("prob_itm_pct")),
+        prob_itm_delta_pct=prob_delta if delta_val is not None else None,
+        extrinsic_pct_spot=_parse_float(row.get("extrinsic_pct_spot")),
+        liquidity_score=l_score,
+        iv_score=0.0,
+        theta_score=t_score,
+        em2x_score=float(em_score),
+        double_score=float(d_score),
+        status_remote=row.get("Status_Remoto") or ""
+    )
 
     num_neg = _parse_float(row.get("num_neg")) or 0.0
     vol_fin = _parse_float(row.get("vol_financeiro")) or 0.0
     illiquid = num_neg < 2 and vol_fin < 1000
     row["illiquidez_flag"] = "1" if illiquid else ""
     if illiquid:
-        # Penaliza fortemente liquidez pífia
         row["score_total"] = _format_decimal(0.0, decimals=2, signed=False)
     else:
         row["score_total"] = _format_decimal(base_score, decimals=2, signed=False)
@@ -849,158 +924,34 @@ def _parse_float(value: Optional[str]) -> Optional[float]:
         return None
 
 
-def _status_moneyness(row: Dict[str, str]) -> str:
-    raw_state = (row.get("ai_otm") or "").upper()
-    if "ITM" in raw_state:
-        return "ITM"
-    dist = _parse_float(row.get("dist_perc_strike"))
-    if dist is None:
-        return ""
-    if "ATM" in raw_state and dist <= 1.0:
-        return "0-5% OTM (colada)"
-    if dist < 0:
-        return "ITM"
-    if dist <= 5:
-        return "0-5% OTM (colada)"
-    if dist <= 15:
-        return "5-15% OTM (aposta)"
-    if dist <= 20:
-        return "15-20% OTM"
-    return "20%+ OTM (loteria)"
-
-
 def _double_scenario(row: Dict[str, str]) -> Tuple[Optional[float], str]:
-    # Usa ask quando existe; se não houver ask, tenta preço teórico
     delta = _parse_float(row.get("delta"))
     strike = _parse_float(row.get("strike"))
     dist = _parse_float(row.get("dist_perc_strike"))
-    if (
-        delta is None
-        or abs(delta) < 1e-4
-        or strike is None
-        or dist is None
-    ):
+    if delta is None or strike is None or dist is None:
         return None, ""
-
-    spot = _spot_from_strike_dist(strike, dist)
-    if spot is None or spot <= 0:
-        return None, ""
-
+    
+    spot = quant.spot_from_strike_dist(strike, dist)
+    if spot is None: return None, ""
+    
     option_price = _price_for_buy(row, spot_price=spot)
-    if option_price is None or option_price <= 0:
-        return None, ""
-
-    move_abs = option_price / abs(delta)
-    if move_abs <= 0:
-        return None, ""
-    pct = (move_abs / spot) * 100.0
-    if not math.isfinite(pct) or pct <= 0:
-        return None, ""
-
-    if pct <= 20:
-        status = "Dobra com até 20% no ativo"
-    elif pct <= 40:
-        status = "Dobra com 20-40% no ativo"
-    else:
-        status = "Precisa de 40%+ no ativo"
-    return pct, status
-
-
-def _spot_from_strike_dist(strike: float, dist: float) -> Optional[float]:
-    denom = 1 + (dist / 100.0)
-    if abs(denom) < 1e-6:
-        return None
-    return strike / denom
+    if option_price is None: return None, ""
+    
+    pct = quant.calculate_double_upside(option_price, delta, spot)
+    if pct is None: return None, ""
+    
+    return pct, quant.get_double_status(pct)
 
 
 def _status_liquidez(row: Dict[str, str]) -> str:
-    num_neg = _parse_float(row.get("num_neg")) or 0.0
-    vol_fin = _parse_float(row.get("vol_financeiro")) or 0.0
-    if num_neg >= 30 or vol_fin >= 50000:
-        return "Alta"
-    if num_neg >= 5 or vol_fin >= 5000:
-        return "Média"
-    if num_neg > 0 or vol_fin > 0:
-        return "Baixa"
-    return ""
+    return quant.get_liquidity_status(
+        _parse_float(row.get("num_neg")) or 0.0,
+        _parse_float(row.get("vol_financeiro")) or 0.0
+    )
 
 
 def _status_theta(row: Dict[str, str]) -> str:
-    theta = _parse_float(row.get("theta_perc"))
-    if theta is None:
-        return ""
-    abs_theta = abs(theta)
-    if abs_theta < 0.5:
-        return "Theta baixo"
-    if abs_theta < 1.0:
-        return "Theta médio"
-    return "Theta alto"
-
-
-def _format_decimal(value: Optional[float], *, decimals: int = 2, signed: bool = False) -> str:
-    if value is None or not math.isfinite(value):
-        return ""
-    fmt = f"{value:+.{decimals}f}" if signed else f"{value:.{decimals}f}"
-    return fmt.replace(".", ",")
-
-
-def _score_moneyness(dist_perc: Optional[float]) -> float:
-    """Escala contínua: melhor quanto mais colado/ITM; zera a 20% OTM."""
-
-    if dist_perc is None:
-        return 0.0
-    if dist_perc <= 0:
-        return 2.0
-    if dist_perc >= 20.0:
-        return 0.0
-    return max(0.0, 2.0 * (1.0 - dist_perc / 20.0))
-
-
-def _score_liquidez(row: Dict[str, str], label: str) -> float:
-    """Score contínuo usando log de num_neg e vol_fin; etiqueta mantém compatibilidade."""
-
-    num_neg = _parse_float(row.get("num_neg")) or 0.0
-    vol_fin = _parse_float(row.get("vol_financeiro")) or 0.0
-
-    def _scale_log(val: float, lo: float, hi: float) -> float:
-        if val <= 0:
-            return 0.0
-        x = math.log10(val)
-        return max(0.0, min(1.0, (x - lo) / (hi - lo)))
-
-    s_num = _scale_log(num_neg, 0.0, 1.7)  # ~1 até 50 negócios
-    s_vol = _scale_log(vol_fin, 3.0, 5.0)  # ~1k até 100k R$
-    score = (s_num + s_vol) / 2.0 * 2.0  # escala para 0-2
-
-    # Usa label para reforçar casos extremos (por compatibilidade com status antigo)
-    if label == "Alta":
-        score = max(score, 1.5)
-    elif label == "Média":
-        score = max(score, 0.8)
-    return min(2.0, score)
-
-
-def _score_dobro(label: str) -> int:
-    if label == "Dobra com até 20% no ativo":
-        return 2
-    if label == "Dobra com 20-40% no ativo":
-        return 1
-    return 0
-
-
-def _score_theta(theta_perc: Optional[float]) -> float:
-    """Escala contínua: melhor para |theta| baixo, saturando em 0.3 e zerando após 1.5."""
-
-    if theta_perc is None:
-        return 0.0
-    abs_theta = abs(theta_perc)
-    best = 0.3
-    worst = 1.5
-    if abs_theta <= best:
-        return 1.0
-    if abs_theta >= worst:
-        return 0.0
-    return max(0.0, 1.0 - (abs_theta - best) / (worst - best))
+    return quant.get_theta_status(_parse_float(row.get("theta_perc")))
 
 
 def _summarize_iv(rows: Sequence[Dict[str, str]]) -> Dict[Tuple[str, str], Optional[float]]:
@@ -1067,229 +1018,12 @@ def _parse_int(value: Optional[str]) -> int:
         return 0
 
 
-def _em_movement(row: Dict[str, str]) -> Tuple[Optional[float], Optional[float]]:
-    vol = _parse_float(row.get("vol_impl_perc"))
-    days = _parse_float(row.get("dias_uteis"))
-    pct_to_double = _parse_float(row.get("%_Alta_p_2x"))
-    if vol is None or days is None or days <= 0:
-        return None, None
-    em_sigma = (vol / 100.0) * math.sqrt(days / 252.0) * 100.0
-    ratio = None
-    if pct_to_double is not None and pct_to_double > 0:
-        ratio = em_sigma / pct_to_double
-    return em_sigma, ratio
-
-
-def _score_em_ratio(ratio: Optional[float]) -> int:
-    if ratio is None:
-        return 0
-    if ratio >= 1.0:
-        return 2
-    if ratio >= 0.5:
-        return 1
-    return 0
-
-
-def _score_delta_prob(delta: Optional[float]) -> float:
-    """Faixa doce entre 0.3-0.6, decai para 0 fora de 0.2-0.8."""
-
-    if delta is None:
-        return 0.0
-    abs_delta = abs(delta)
-    if abs_delta < 0.2 or abs_delta > 0.8:
-        return 0.0
-    if abs_delta < 0.3:
-        return (abs_delta - 0.2) / 0.1
-    if abs_delta <= 0.6:
-        return 1.0
-    return max(0.0, (0.8 - abs_delta) / 0.2)
-
-
-def _score_extrinsic(extrinsic_pct: Optional[float]) -> float:
-    """Quanto menor a extrínseca/spot, melhor; zera acima de 15%."""
-
-    if extrinsic_pct is None or extrinsic_pct < 0:
-        return 0.0
-    if extrinsic_pct >= 15.0:
-        return 0.0
-    return max(0.0, min(1.0, 1.0 - extrinsic_pct / 15.0))
-
-
-def _score_prob_itm(prob: Optional[float]) -> float:
-    """Faixa doce 30–60% de prob ITM; zera fora de 20–80%."""
-
-    if prob is None:
-        return 0.0
-    if prob < 0.2 or prob > 0.8:
-        return 0.0
-    if prob < 0.3:
-        return (prob - 0.2) / 0.1
-    if prob <= 0.6:
-        return 1.0
-    return max(0.0, (0.8 - prob) / 0.2)
-
-
-def _weighted_score(row: Dict[str, str], iv_pts: float) -> float:
-    """Combina métricas contínuas com pesos explícitos."""
-
-    def _clamp01(x: float) -> float:
-        return max(0.0, min(1.0, x))
-
-    m_norm = _clamp01((_parse_float(row.get("moneyness_score")) or 0.0) / 2.0)
-    prob = _parse_float(row.get("prob_itm_pct"))
-    if prob is None:
-        prob = _parse_float(row.get("prob_itm_delta_pct"))
-    prob_norm = _score_prob_itm((prob or 0.0) / 100.0 if prob is not None else None)
-    extr_norm = _score_extrinsic(_parse_float(row.get("extrinsic_pct_spot")))
-    liq_norm = _clamp01((_parse_float(row.get("liquidez_score")) or 0.0) / 2.0)
-    iv_norm = _clamp01((iv_pts or 0.0) / 3.0)
-    theta_norm = _clamp01(_parse_float(row.get("theta_score")) or 0.0)
-    em2x = _parse_float(row.get("em2x_score")) or 0.0
-    dobro = _parse_float(row.get("dobro_score")) or 0.0
-    asym_norm = _clamp01(((em2x / 2.0) + (dobro / 2.0)) / 2.0)
-
-    status = (row.get("Status_Remoto") or "").lower()
-    if "aposta" in status:
-        weights = {
-            "m": 0.30,
-            "prob": 0.15,
-            "extr": 0.10,
-            "liq": 0.15,
-            "iv": 0.10,
-            "asym": 0.20,
-            "theta": 0.0,
-        }
-    else:
-        weights = {
-            "m": 0.15,
-            "prob": 0.30,
-            "extr": 0.15,
-            "liq": 0.15,
-            "iv": 0.10,
-            "theta": 0.15,
-            "asym": 0.0,
-        }
-
-    score = (
-        weights["m"] * m_norm
-        + weights["prob"] * prob_norm
-        + weights["extr"] * extr_norm
-        + weights["liq"] * liq_norm
-        + weights["iv"] * iv_norm
-        + weights["theta"] * theta_norm
-        + weights["asym"] * asym_norm
-    )
-    return score * 10.0  # escala para ~0-10 para compatibilidade visual
-
-
-def _prob_itm(spot_price: Optional[float], row: Dict[str, str]) -> Optional[float]:
-    """Probabilidade neutra ao risco de expirar ITM (approx N(d2))."""
-
-    spot = spot_price or _parse_float(row.get("underlying_price"))
-    strike = _parse_float(row.get("strike"))
-    vol = _parse_float(row.get("vol_impl_perc"))
-    days = _parse_float(row.get("dias_uteis"))
-    if spot is None or strike is None or vol is None or days is None:
-        return None
-    if spot <= 0 or strike <= 0 or vol <= 0 or days <= 0:
-        return None
-    sigma = vol / 100.0
-    t = days / 252.0
-    denom = sigma * math.sqrt(t)
-    if denom <= 0:
-        return None
-    d1 = (math.log(spot / strike) + 0.5 * sigma * sigma * t) / denom
-    d2 = d1 - denom
-    prob_itm = 0.5 * (1.0 + math.erf(d2 / math.sqrt(2)))
-    return max(0.0, min(1.0, prob_itm))
-
-
-def _prob_move(spot_price: Optional[float], pct_move: Optional[float], row: Dict[str, str]) -> Optional[float]:
-    """Probabilidade neutra ao risco de subir pelo menos pct_move (em %)."""
-
-    if pct_move is None or pct_move <= 0:
-        return None
-    spot = spot_price or _parse_float(row.get("underlying_price"))
-    vol = _parse_float(row.get("vol_impl_perc"))
-    days = _parse_float(row.get("dias_uteis"))
-    if spot is None or vol is None or days is None:
-        return None
-    if spot <= 0 or vol <= 0 or days <= 0:
-        return None
-    target = spot * (1.0 + pct_move / 100.0)
-    sigma = vol / 100.0
-    t = days / 252.0
-    denom = sigma * math.sqrt(t)
-    if denom <= 0:
-        return None
-    z = (math.log(target / spot) + 0.5 * sigma * sigma * t) / denom
-    prob = 1.0 - 0.5 * (1.0 + math.erf(z / math.sqrt(2)))
-    return max(0.0, min(1.0, prob))
-
-
-def _classify_remote(row: Dict[str, str]) -> str:
-    """Classifica aposta remota/loteria com base em probabilidade e prazo."""
-
-    prob_itm = _parse_float(row.get("prob_itm_pct"))
-    if prob_itm is None:
-        prob_itm = _parse_float(row.get("prob_itm_delta_pct"))
-    extrinsic_pct = _parse_float(row.get("extrinsic_pct_spot"))
-    days = _parse_float(row.get("dias_uteis"))
-
-    if prob_itm is None:
-        return ""
-    if prob_itm < 25.0:
-        return "Loteria (<25% ITM)"
-    if (
-        25.0 <= prob_itm <= 60.0
-        and extrinsic_pct is not None
-        and extrinsic_pct <= 10.0
-        and days is not None
-        and days >= 252.0
-    ):
-        return "Aposta remota racional"
-    return ""
-
-
 def _normalize_underlying(value: Optional[str]) -> str:
     return (value or "").strip().upper()
 
 
 def _normalize_ticker(value: Optional[str]) -> str:
     return (value or "").strip().upper()
-
-
-def _cost_pct(row: Dict[str, str], spot_price: Optional[float]) -> Optional[float]:
-    if spot_price is None or spot_price <= 0:
-        return None
-    option_price = _price_for_buy(row, spot_price=spot_price)
-    if option_price is None:
-        return None
-    return (option_price / spot_price) * 100.0
-
-
-def _intrinsic_extrinsic(row: Dict[str, str], spot_price: Optional[float]) -> Tuple[Optional[float], Optional[float]]:
-    if spot_price is None or spot_price <= 0:
-        return None, None
-    strike = _parse_float(row.get("strike"))
-    option_price = _price_for_buy(row, spot_price=spot_price)
-    if strike is None or option_price is None:
-        return None, None
-    intrinsic = max(spot_price - strike, 0.0)
-    extrinsic = max(option_price - intrinsic, 0.0)
-    return intrinsic, extrinsic
-
-
-def _extrinsic_pct_spot(extrinsic: Optional[float], spot_price: Optional[float]) -> Optional[float]:
-    if extrinsic is None or spot_price is None or spot_price <= 0:
-        return None
-    return (extrinsic / spot_price) * 100.0
-
-
-def _distorcao_preco(price_buy: Optional[float], price_theoretical: Optional[float]) -> Optional[float]:
-    if price_buy is None or price_theoretical is None or price_theoretical <= 0:
-        return None
-    return ((price_buy - price_theoretical) / price_theoretical) * 100.0
 
 
 def _apply_penalties(row: Dict[str, str]) -> None:
@@ -1301,18 +1035,6 @@ def _apply_penalties(row: Dict[str, str]) -> None:
     if be_dist is not None and be_dist > 15.0:
         score = max(0.0, score - 2.0)
     row["score_total"] = _format_decimal(score, decimals=2, signed=False)
-
-
-def _breakeven(spot: Optional[float], row: Dict[str, str]) -> Tuple[Optional[float], Optional[float]]:
-    if spot is None or spot <= 0:
-        return None, None
-    strike = _parse_float(row.get("strike"))
-    price = _price_for_buy(row, spot_price=spot)
-    if strike is None or price is None:
-        return None, None
-    be_price = strike + price
-    dist_pct = ((be_price - spot) / spot) * 100.0
-    return be_price, dist_pct
 
 
 def _price_for_buy(row: Dict[str, str], spot_price: Optional[float] = None) -> Optional[float]:
@@ -1343,6 +1065,7 @@ def _compute_spread_pct(row: Dict[str, str]) -> Optional[float]:
 
 
 def _compute_theoretical_price(row: Dict[str, str], spot_price: Optional[float]) -> Optional[float]:
+
     if spot_price is None or spot_price <= 0:
         return None
     vol = _parse_float(row.get("vol_impl_perc"))
@@ -1351,21 +1074,10 @@ def _compute_theoretical_price(row: Dict[str, str], spot_price: Optional[float])
     if vol is None or strike is None or days is None or days <= 0 or vol <= 0:
         return None
     try:
-        return _black_scholes_call(spot_price, strike, vol / 100.0, days / 252.0)
+        return quant.calculate_black_scholes_call(spot_price, strike, vol / 100.0, days / 252.0)
     except Exception:
         return None
 
-
-def _black_scholes_call(spot: float, strike: float, vol: float, years: float, rate: float = 0.0, div: float = 0.0) -> float:
-    if spot <= 0 or strike <= 0 or vol <= 0 or years <= 0:
-        return 0.0
-    sqrt_t = math.sqrt(years)
-    d1 = (math.log(spot / strike) + (rate - div + 0.5 * vol * vol) * years) / (vol * sqrt_t)
-    d2 = d1 - vol * sqrt_t
-    # N(x) approx via error function
-    nd1 = 0.5 * (1.0 + math.erf(d1 / math.sqrt(2)))
-    nd2 = 0.5 * (1.0 + math.erf(d2 / math.sqrt(2)))
-    return spot * math.exp(-div * years) * nd1 - strike * math.exp(-rate * years) * nd2
 
 
 def _infer_snapshot_date(rows: Sequence[Dict[str, str]]) -> Optional[str]:

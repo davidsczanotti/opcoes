@@ -212,19 +212,39 @@ def _parse_float(value) -> float | None:
         return None
 
 
-def _fetch_bova_suggestions(
-    *,
+def calculate_covered_call_strategy(
     underlying: str,
+    positions_open: List[Dict],
+    options_rows: List[Dict],
+    quote: Dict | None,
     min_extrinsic: float,
     min_days: int,
     max_days: int,
     min_dist_strike: float,
-    db_path: Path | None = None,
-) -> List[Dict]:
-    rows = fetch_latest_underlying_options(underlying=underlying, db_path=db_path)
+) -> Dict[str, Any]:
+    """
+    Pure strategy logic for Covered Call.
+    Calculates coverage, cashflows, and finds best suggestions based on provided data.
+    """
+    positions_real = [p for p in positions_open if not p.get("is_simulated")]
+    positions_simulated = [p for p in positions_open if p.get("is_simulated")]
 
+    stock_real, lots_real, covered_real = _bova_coverage(positions_real, underlying)
+    stock_sim, lots_sim, covered_sim = _bova_coverage(positions_simulated, underlying)
+
+    call_summary_real = _call_cashflow_summaries(covered_real, lots_real)
+    call_summary_sim = _call_cashflow_summaries(covered_sim, lots_sim)
+
+    # Reuses the existing helper, but we need to adapt _fetch_bova_suggestions logic
+    # to accept rows instead of fetching them.
+    # Since _fetch_bova_suggestions was tightly coupled with fetching, we'll inline/adapt its filtering logic here
+    # or extract a pure filter function.
+    # To keep it clean, let's look at _fetch_bova_suggestions again.
+    # It fetches AND filters. We should split it.
+    
+    # Let's do the filtering here directly on options_rows
     suggestions: List[Dict] = []
-    for r in rows:
+    for r in options_rows:
         dias_uteis = _parse_float(r["dias_uteis"])
         if dias_uteis is None:
             continue
@@ -236,6 +256,7 @@ def _fetch_bova_suggestions(
         dist = _parse_float(r["dist_perc_strike"])
         if dist is None or dist < min_dist_strike:
             continue
+        
         suggestion = {
             "ticker": r["ticker"],
             "underlying": r["underlying"],
@@ -257,8 +278,6 @@ def _fetch_bova_suggestions(
         )
     )
 
-    # Marca a sugestão mais vantajosa com base em um score simples:
-    # extrínseca % sobre o spot por dia útil (quanto maior, melhor).
     best_idx = None
     best_score = None
     for idx, s in enumerate(suggestions):
@@ -274,36 +293,6 @@ def _fetch_bova_suggestions(
         suggestions[best_idx]["best_flag"] = True
         suggestions[best_idx]["best_yield_per_day"] = best_score
 
-    return suggestions
-
-
-def get_covered_call_context(args: Mapping[str, Any]) -> Dict[str, Any]:
-    underlying = (args.get("underlying", "CMIG4") or "CMIG4").strip().upper()
-    min_extrinsic = float(args.get("min_extrinsic", 2.0) or 0.0)
-    min_days = _get_int_arg(args, "min_days", 30)
-    max_days = _get_int_arg(args, "max_days", 200)
-    min_dist_strike = float(args.get("min_dist_strike", 1.0) or 0.0)
-
-    positions_open = list_positions(include_closed=False)
-    positions_real = [p for p in positions_open if not p.get("is_simulated")]
-    positions_simulated = [p for p in positions_open if p.get("is_simulated")]
-
-    stock_real, lots_real, covered_real = _bova_coverage(positions_real, underlying)
-    stock_sim, lots_sim, covered_sim = _bova_coverage(positions_simulated, underlying)
-
-    call_summary_real = _call_cashflow_summaries(covered_real, lots_real)
-    call_summary_sim = _call_cashflow_summaries(covered_sim, lots_sim)
-
-    suggestions = _fetch_bova_suggestions(
-        underlying=underlying,
-        min_extrinsic=min_extrinsic,
-        min_days=min_days,
-        max_days=max_days,
-        min_dist_strike=min_dist_strike,
-    )
-
-    quote = fetch_latest_underlying_quote(underlying)
-
     return {
         "underlying": underlying,
         "underlying_quote": quote,
@@ -317,3 +306,29 @@ def get_covered_call_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         "call_summary_sim": call_summary_sim,
         "suggestions": suggestions,
     }
+
+
+def get_covered_call_context(args: Mapping[str, Any]) -> Dict[str, Any]:
+    underlying = (args.get("underlying", "CMIG4") or "CMIG4").strip().upper()
+    min_extrinsic = float(args.get("min_extrinsic", 2.0) or 0.0)
+    min_days = _get_int_arg(args, "min_days", 30)
+    max_days = _get_int_arg(args, "max_days", 200)
+    min_dist_strike = float(args.get("min_dist_strike", 1.0) or 0.0)
+
+    # IO / Data Fetching
+    positions_open = list_positions(include_closed=False)
+    # We fetch rows here instead of inside the helper
+    options_rows = fetch_latest_underlying_options(underlying=underlying)
+    quote = fetch_latest_underlying_quote(underlying)
+
+    # Pure Logic Delegation
+    return calculate_covered_call_strategy(
+        underlying=underlying,
+        positions_open=positions_open,
+        options_rows=options_rows,
+        quote=quote,
+        min_extrinsic=min_extrinsic,
+        min_days=min_days,
+        max_days=max_days,
+        min_dist_strike=min_dist_strike,
+    )

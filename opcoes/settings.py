@@ -15,6 +15,13 @@ class FeeSettings:
     option_percent_notional: float = 0.0  # em % sobre (strike * 100 * contratos)
 
 
+@dataclass
+class StrategySettings:
+    min_score: int = 8
+    limit_opportunities: int = 30
+    recurring_days: int = 30
+
+
 def _connect() -> sqlite3.Connection:
     db_path = get_db_path()
     conn = sqlite3.connect(db_path)
@@ -65,6 +72,31 @@ def get_fee_settings() -> FeeSettings:
     )
 
 
+def get_strategy_settings() -> StrategySettings:
+    conn = _connect()
+    try:
+        rows = conn.execute("SELECT key, value FROM settings").fetchall()
+    finally:
+        conn.close()
+
+    raw: Dict[str, str] = {str(r["key"]): str(r["value"]) for r in rows}
+
+    def _parse_int(name: str, default: int) -> int:
+        text = raw.get(name, "").strip()
+        if not text:
+            return default
+        try:
+            return int(text)
+        except ValueError:
+            return default
+
+    return StrategySettings(
+        min_score=_parse_int("strat_min_score", 8),
+        limit_opportunities=_parse_int("strat_limit_opportunities", 30),
+        recurring_days=_parse_int("strat_recurring_days", 30),
+    )
+
+
 def update_fee_settings(
     *,
     equity_fixed: float,
@@ -96,4 +128,38 @@ def update_fee_settings(
         conn.close()
 
 
-__all__ = ["FeeSettings", "get_fee_settings", "update_fee_settings"]
+def update_strategy_settings(
+    *,
+    min_score: int,
+    limit_opportunities: int,
+    recurring_days: int,
+) -> None:
+    conn = _connect()
+    try:
+        params = {
+            "strat_min_score": min_score,
+            "strat_limit_opportunities": limit_opportunities,
+            "strat_recurring_days": recurring_days,
+        }
+        for key, value in params.items():
+            conn.execute(
+                """
+                INSERT INTO settings (key, value)
+                VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (key, str(value)),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+__all__ = [
+    "FeeSettings",
+    "get_fee_settings",
+    "update_fee_settings",
+    "StrategySettings",
+    "get_strategy_settings",
+    "update_strategy_settings",
+]

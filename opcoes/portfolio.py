@@ -232,6 +232,41 @@ def delete_position(*, position_id: int) -> None:
     conn.close()
 
 
+def get_position(position_id: int) -> Optional[dict]:
+    conn = _connect()
+    try:
+        query = """
+            SELECT
+                p.*,
+                snap.snapshot_date AS last_snapshot_date,
+                snap."ultimo" AS last_price_raw,
+                snap."score_total" AS last_score_total,
+                snap."trend_flag" AS last_trend_flag,
+                snap."vencimento" AS last_vencimento,
+                snap."dias_uteis" AS last_dias_uteis,
+                snap."underlying_price" AS last_underlying_price,
+                snap."extrinsic_pct_spot" AS last_extrinsic_pct_spot,
+                snap."%_Alta_p_2x" AS last_pct_2x,
+                snap."strike" AS last_strike
+            FROM positions p
+            LEFT JOIN (
+                SELECT os1.*
+                FROM option_snapshots os1
+                INNER JOIN (
+                    SELECT ticker, MAX(snapshot_date) AS snapshot_date
+                    FROM option_snapshots
+                    GROUP BY ticker
+                ) latest
+                ON os1.ticker = latest.ticker AND os1.snapshot_date = latest.snapshot_date
+            ) AS snap ON snap.ticker = p.ticker
+            WHERE p.id = ?
+        """
+        row = conn.execute(query, (int(position_id),)).fetchone()
+        return _row_to_dict(row) if row else None
+    finally:
+        conn.close()
+
+
 def list_positions(
     *,
     include_closed: bool = False,
@@ -394,4 +429,11 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     }
 
 
-__all__ = ["add_position", "list_positions"]
+__all__ = [
+    "add_position",
+    "list_positions",
+    "get_position",
+    "update_position",
+    "close_position",
+    "delete_position",
+]

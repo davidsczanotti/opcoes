@@ -89,6 +89,45 @@
         </div>
 
         <div class="col-12 mt-4">
+          <hr>
+          <h1 class="h4 mb-3">Configuração de Estratégia</h1>
+          <p class="text-muted small">
+            Parâmetros padrão para os relatórios e rankings.
+          </p>
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label small">Score Mínimo</label>
+          <input
+            name="strat_min_score"
+            class="form-control form-control-sm"
+            type="number"
+            value="{{ strat.min_score }}"
+          >
+          <small class="text-muted">Filtra oportunidades abaixo deste score (padrão 8).</small>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label small">Limite de Oportunidades</label>
+          <input
+            name="strat_limit_opportunities"
+            class="form-control form-control-sm"
+            type="number"
+            value="{{ strat.limit_opportunities }}"
+          >
+          <small class="text-muted">Máximo de itens no relatório (padrão 30).</small>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label small">Janela de Recorrência (dias)</label>
+          <input
+            name="strat_recurring_days"
+            class="form-control form-control-sm"
+            type="number"
+            value="{{ strat.recurring_days }}"
+          >
+          <small class="text-muted">Dias para buscar repetição de sinais (padrão 30).</small>
+        </div>
+
+        <div class="col-12 mt-4">
           <button type="submit" class="btn btn-primary btn-sm">Salvar</button>
         </div>
       </form>

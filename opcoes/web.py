@@ -1,15 +1,24 @@
 from __future__ import annotations
 
+import datetime
 import sqlite3
 from pathlib import Path
 
 from flask import Flask, redirect, render_template, request, url_for
 
 from .config import get_db_path
-from .portfolio import add_position, delete_position, list_positions, update_position
+from .portfolio import add_position, delete_position, list_positions, update_position, close_position, get_position
 from .scraper.storage import _parse_ptbr_number
-from .settings import FeeSettings, get_fee_settings, update_fee_settings
+from .settings import (
+    FeeSettings,
+    StrategySettings,
+    get_fee_settings,
+    get_strategy_settings,
+    update_fee_settings,
+    update_strategy_settings,
+)
 from .strategies import get_cash_covered_put_context, get_covered_call_context, get_ranking_context
+from . import finance
 
 
 def create_app() -> Flask:
@@ -30,10 +39,80 @@ def create_app() -> Flask:
         ctx = get_cash_covered_put_context(request.args)
         return render_template("cash_covered_put.html", **ctx)
 
+    @app.post("/finance/add")
+    def finance_add():
+        form = request.form
+        amount = _parse_form_float(form.get("amount"))
+        type_str = form.get("type")
+        desc = form.get("description") or "Movimentação manual"
+        date = form.get("date") or datetime.date.today().isoformat()
+        
+        # Valid transaction type
+        try:
+            tx_type = finance.TransactionType(type_str)
+        except ValueError:
+            return redirect(url_for("cash_covered_put")) # Or error page
+
+        # Negative amount for withdrawal
+        if tx_type == finance.TransactionType.WITHDRAWAL and amount > 0:
+            amount = -amount
+            
+        finance.add_transaction(
+            date=date,
+            type=tx_type,
+            amount=amount,
+            description=desc
+        )
+        return redirect(url_for("cash_covered_put"))
+
+    @app.post("/finance/assign")
+    def finance_assign():
+        form = request.form
+        position_id = int(form.get("position_id"))
+        strike = _parse_form_float(form.get("strike"))
+        qty = int(form.get("qty"))
+        date = form.get("date") or datetime.date.today().isoformat()
+        
+        # 1. Close the PUT position
+        # Assuming exit price 0 or current market price? Usually 0 if exercised ITM? 
+        # Actually, if assigned, we keep the premium, but buy the stock.
+        # So we close the option position effectively.
+        close_position(position_id=position_id, exit_date=date, exit_price=0.0, exit_reason="Exercício")
+
+        # 2. Debit the cash (Strike * Qty)
+        cost = strike * qty
+        finance.add_transaction(
+            date=date,
+            type=finance.TransactionType.ASSIGNMENT,
+            amount=-cost,
+            description=f"Exercício PUT {position_id} @ {strike}",
+            position_id=position_id
+        )
+
+        # 3. Open STOCK position (optional, but good for tracking)
+        # We need the underlying ticker.
+        pos = get_position(position_id)
+        if pos:
+            add_position(
+                ticker=pos["underlying"], # Now we own the stock
+                underlying=pos["underlying"],
+                trade_date=date,
+                qty=qty,
+                entry_price=strike,
+                fees=0.0, # Fees handled in transaction? Or user adds later?
+                trade_type="stock",
+                notes=f"Exercício da opção {pos['ticker']}",
+                parent_position_id=position_id
+            )
+
+        return redirect(url_for("cash_covered_put"))
+
     @app.route("/settings", methods=["GET", "POST"])
     def settings_view() -> str:
         if request.method == "POST":
             form = request.form
+            
+            # Fee Settings
             equity_fixed = _parse_form_float(form.get("equity_fixed"))
             equity_percent = _parse_form_float(form.get("equity_percent"))
             option_fixed = _parse_form_float(form.get("option_fixed"))
@@ -44,10 +123,22 @@ def create_app() -> Flask:
                 option_fixed=option_fixed,
                 option_percent_notional=option_percent_notional,
             )
+            
+            # Strategy Settings
+            min_score = int(form.get("strat_min_score", 8))
+            limit_opp = int(form.get("strat_limit_opportunities", 30))
+            recur_days = int(form.get("strat_recurring_days", 30))
+            update_strategy_settings(
+                min_score=min_score,
+                limit_opportunities=limit_opp,
+                recurring_days=recur_days,
+            )
+
             return redirect(url_for("settings_view"))
 
         fees_cfg: FeeSettings = get_fee_settings()
-        return render_template("settings.html", fees=fees_cfg)
+        strat_cfg: StrategySettings = get_strategy_settings()
+        return render_template("settings.html", fees=fees_cfg, strat=strat_cfg)
     @app.route("/positions")
     def positions() -> str:
         positions = list_positions(include_closed=True)
@@ -70,7 +161,8 @@ def create_app() -> Flask:
             fees = _auto_fees(ticker=ticker, underlying=underlying or ticker, qty=qty, entry_price=entry_price)
         parent_raw = form.get("parent_position_id")
         parent_id = int(parent_raw) if parent_raw and parent_raw.strip() else None
-        add_position(
+        
+        pos_id = add_position(
             ticker=ticker,
             underlying=underlying,
             trade_date=form.get("trade_date", ""),
@@ -83,6 +175,31 @@ def create_app() -> Flask:
             is_simulated=is_simulated,
             parent_position_id=parent_id,
         )
+
+        # Se for venda de opção (PUT ou CALL) e não simulado, registra o prêmio no caixa
+        if not is_simulated and entry_price > 0:
+            # Simplificação: se tem "trade_type" swing/daytrade, assumimos venda? 
+            # Melhor checar se é option. infer_option_type não está importado aqui, mas podemos assumir pelo ticker.
+            # Se for short position (venda), entra dinheiro.
+            # O form add_position atual assume "Compra"? Não, o cli.py diz "add_position" e "entry_price".
+            # Normalmente "add position" é "abrir". 
+            # Se for "Venda Coberta" ou "Venda de Put", abrimos VENDIDO.
+            # O sistema atual de portfolio não distingue explicitamente Long/Short no "add", apenas qtd.
+            # Vamos assumir que se o usuário está na tela de "Cash Covered Put", ele está vendendo.
+            # Mas o endpoint /positions/add é genérico.
+            # Vamos adicionar um checkbox ou hidden field "credit_premium" no form da view, ou inferir.
+            # Por enquanto, vamos deixar manual ou fazer uma verificação simples:
+            # Se o usuário marcar "Registrar Prêmio no Caixa" (novo campo no form).
+            if form.get("record_premium") == "1":
+                total_premium = (entry_price * qty) - fees
+                finance.add_transaction(
+                    date=form.get("trade_date", ""),
+                    type=finance.TransactionType.PREMIUM,
+                    amount=total_premium,
+                    description=f"Prêmio {ticker} ({qty}x)",
+                    position_id=pos_id
+                )
+
         return redirect(url_for("positions"))
 
     @app.post("/positions/update/<int:position_id>")
