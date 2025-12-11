@@ -33,4 +33,15 @@ def infer_option_type(ticker: str) -> Optional[str]:
     return None
 
 
-__all__ = ["infer_option_type", "CALL_SERIES", "PUT_SERIES"]
+def format_decimal(value: Optional[float], decimals: int = 2, signed: bool = False) -> str:
+    """Formata float para string PT-BR (vírgula decimal)."""
+    if value is None:
+        return ""
+    fmt = f"{{:.{decimals}f}}"
+    txt = fmt.format(value).replace(".", ",")
+    if signed and value > 0:
+        txt = f"+{txt}"
+    return txt
+
+
+__all__ = ["infer_option_type", "format_decimal", "CALL_SERIES", "PUT_SERIES"]

@@ -38,7 +38,7 @@ from .ivrank import IVRankStore
 from .activity import FlowStore
 from .snapshots import SnapshotDB
 from .far_expirations import fetch_far_expiration_quotes
-from ..utils import infer_option_type
+from ..utils import infer_option_type, format_decimal as _format_decimal
 from .. import quant
 from .health import check_health
 
