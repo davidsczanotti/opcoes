@@ -62,6 +62,16 @@
               </select>
             </div>
             <div class="col-md-2">
+              <label class="form-label small">Estratégia</label>
+              <select name="strategy_tag" class="form-select form-select-sm">
+                <option value="">-</option>
+                <option value="cash_put">Cash-Covered Put</option>
+                <option value="covered_call">Covered Call</option>
+                <option value="ranking">Aposta / Ranking</option>
+                <option value="outro">Outro</option>
+              </select>
+            </div>
+            <div class="col-md-2">
               <label class="form-label small">Simulado?</label>
               <select name="is_simulated" class="form-select form-select-sm">
                 <option value="0">Não (real)</option>
@@ -99,6 +109,7 @@
                 <th>Ativo</th>
                 <th>Status</th>
                 <th>Tipo</th>
+                <th>Estratégia</th>
                 <th>Lote pai</th>
                 <th>Simulado?</th>
                 <th>Data</th>
@@ -134,6 +145,15 @@
                       <select name="trade_type" class="form-select form-select-sm">
                         <option value="swing" {% if pos.trade_type == 'swing' %}selected{% endif %}>swing</option>
                         <option value="daytrade" {% if pos.trade_type == 'daytrade' %}selected{% endif %}>day trade</option>
+                      </select>
+                    </td>
+                    <td style="min-width: 130px;">
+                      <select name="strategy_tag" class="form-select form-select-sm">
+                        <option value="" {% if not pos.strategy_tag %}selected{% endif %}>-</option>
+                        <option value="cash_put" {% if pos.strategy_tag == 'cash_put' %}selected{% endif %}>Cash-Covered Put</option>
+                        <option value="covered_call" {% if pos.strategy_tag == 'covered_call' %}selected{% endif %}>Covered Call</option>
+                        <option value="ranking" {% if pos.strategy_tag == 'ranking' %}selected{% endif %}>Aposta / Ranking</option>
+                        <option value="outro" {% if pos.strategy_tag == 'outro' %}selected{% endif %}>Outro</option>
                       </select>
                     </td>
                     <td style="min-width: 70px;">

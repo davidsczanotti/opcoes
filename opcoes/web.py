@@ -174,6 +174,7 @@ def create_app() -> Flask:
             notes=form.get("notes") or None,
             is_simulated=is_simulated,
             parent_position_id=parent_id,
+            strategy_tag=form.get("strategy_tag") or None,
         )
 
         # Se for venda de opção (PUT ou CALL) e não simulado, registra o prêmio no caixa
@@ -233,6 +234,7 @@ def create_app() -> Flask:
             exit_reason=form.get("exit_reason") or None,
             is_simulated=is_simulated,
             parent_position_id=parent_id,
+            strategy_tag=form.get("strategy_tag") or None,
         )
         return redirect(url_for("positions"))
 

@@ -60,6 +60,7 @@ def _ensure_position_columns(conn: sqlite3.Connection) -> None:
         "irrf": "REAL",
         "is_simulated": "INTEGER DEFAULT 0",
         "parent_position_id": "INTEGER",
+        "strategy_tag": "TEXT",
     }
     for col, col_type in columns.items():
         if col not in existing:
@@ -88,13 +89,31 @@ def add_position(
     exit_reason: Optional[str] = None,
     is_simulated: bool = False,
     parent_position_id: Optional[int] = None,
+    strategy_tag: Optional[str] = None,
 ) -> int:
     conn = _connect()
     cursor = conn.cursor()
     cursor.execute(
         """
-        INSERT INTO positions (ticker, underlying, trade_date, qty, entry_price, fees, trade_type, irrf, notes, partial_date, partial_price, partial_qty, exit_reason, is_simulated, parent_position_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO positions (
+            ticker,
+            underlying,
+            trade_date,
+            qty,
+            entry_price,
+            fees,
+            trade_type,
+            irrf,
+            notes,
+            partial_date,
+            partial_price,
+            partial_qty,
+            exit_reason,
+            is_simulated,
+            parent_position_id,
+            strategy_tag
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             _normalize_ticker(ticker),
@@ -112,6 +131,7 @@ def add_position(
             exit_reason,
             1 if is_simulated else 0,
             int(parent_position_id) if parent_position_id is not None else None,
+            strategy_tag or None,
         ),
     )
     conn.commit()
@@ -166,6 +186,7 @@ def update_position(
     irrf: Optional[float] = None,
     is_simulated: Optional[bool] = None,
     parent_position_id: Optional[int] = None,
+    strategy_tag: Optional[str] = None,
 ) -> None:
     fields = []
     params = []
@@ -217,6 +238,9 @@ def update_position(
     if parent_position_id is not None:
         fields.append("parent_position_id = ?")
         params.append(int(parent_position_id))
+    if strategy_tag is not None:
+        fields.append("strategy_tag = ?")
+        params.append(strategy_tag)
     if not fields:
         return
 
@@ -433,6 +457,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
         "extrinsic_pct_spot": extrinsic_pct_spot,
         "pct_2x": pct_2x,
         "strike": last_strike,
+        "strategy_tag": row["strategy_tag"] if "strategy_tag" in row.keys() else None,
     }
 
 
