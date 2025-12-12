@@ -99,15 +99,16 @@ def create_app() -> Flask:
         # We need the underlying ticker.
         if pos:
             add_position(
-                ticker=pos["underlying"], # Now we own the stock
+                ticker=pos["underlying"],  # Agora passamos a ter o papel
                 underlying=pos["underlying"],
                 trade_date=date,
                 qty=qty,
                 entry_price=strike,
-                fees=0.0, # Fees handled in transaction? Or user adds later?
+                fees=0.0,  # Taxas podem ser lançadas manualmente depois
                 trade_type="stock",
                 notes=f"Exercício da opção {pos['ticker']}",
-                parent_position_id=position_id
+                parent_position_id=position_id,
+                strategy_tag="covered_call",
             )
 
         return redirect(url_for("cash_covered_put"))

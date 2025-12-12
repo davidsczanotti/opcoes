@@ -6,6 +6,7 @@ from ..portfolio import list_positions
 from ..snapshot_repository import fetch_latest_underlying_options, fetch_latest_underlying_quote
 from ..scraper.storage import _parse_ptbr_number
 from ..settings import get_covered_call_settings, update_covered_call_settings
+from ..utils import infer_option_type
 
 
 def _get_int_arg(args: Mapping[str, Any], name: str, default: int) -> int:
@@ -41,12 +42,13 @@ def _bova_coverage(positions: List[Dict], underlying: str) -> Tuple[Dict[str, An
         for p in positions
         if (p.get("ticker") or "").strip().upper() == underlying
     ]
-    # Calls do ativo-objeto (underlying == underlying, ticker != underlying)
+    # Calls do ativo-objeto (underlying == underlying, ticker != underlying, tipo CALL)
     call_positions: List[Dict] = [
         p
         for p in positions
         if (p.get("underlying") or "").strip().upper() == underlying
         and (p.get("ticker") or "").strip().upper() != underlying
+        and infer_option_type(p.get("ticker")) == "CALL"
     ]
 
     # Ordena lotes e calls por data (FIFO)
@@ -253,6 +255,9 @@ def calculate_covered_call_strategy(
     # Let's do the filtering here directly on options_rows
     suggestions: List[Dict] = []
     for r in options_rows:
+        opt_type = (r.get("option_type") or infer_option_type(r.get("ticker")) or "").upper()
+        if opt_type and opt_type != "CALL":
+            continue
         dias_uteis = _parse_float(r["dias_uteis"])
         if dias_uteis is None:
             continue
