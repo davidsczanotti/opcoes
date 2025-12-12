@@ -182,8 +182,48 @@ def create_app() -> Flask:
         return render_template("settings.html", fees=fees_cfg, strat=strat_cfg)
     @app.route("/positions")
     def positions() -> str:
-        positions = list_positions(include_closed=True)
-        return render_template("positions.html", positions=positions)
+        ticker_contains = (request.args.get("ticker") or "").strip().upper()
+        underlying_contains = (request.args.get("underlying") or "").strip().upper()
+        strategy_tag = (request.args.get("strategy_tag") or "").strip()
+        trade_type = (request.args.get("trade_type") or "").strip().lower()
+        status = (request.args.get("status") or "all").strip().lower()
+        is_simulated_raw = (request.args.get("is_simulated") or "").strip()
+
+        include_closed = True
+        only_closed = False
+        if status == "open":
+            include_closed = False
+        elif status == "closed":
+            only_closed = True
+
+        is_simulated = None
+        if is_simulated_raw in {"0", "1"}:
+            is_simulated = is_simulated_raw == "1"
+
+        next_url = request.full_path
+        if next_url.endswith("?"):
+            next_url = request.path
+
+        positions = list_positions(
+            include_closed=include_closed,
+            only_closed=only_closed,
+            ticker_contains=ticker_contains or None,
+            underlying_contains=underlying_contains or None,
+            strategy_tag=strategy_tag or None,
+            trade_type=trade_type or None,
+            is_simulated=is_simulated,
+        )
+        return render_template(
+            "positions.html",
+            positions=positions,
+            filter_ticker=ticker_contains,
+            filter_underlying=underlying_contains,
+            filter_strategy_tag=strategy_tag,
+            filter_trade_type=trade_type,
+            filter_status=status,
+            filter_is_simulated=is_simulated_raw,
+            next_url=next_url,
+        )
 
     @app.post("/positions/add")
     def add_position_view():
@@ -243,7 +283,7 @@ def create_app() -> Flask:
                     is_simulated=is_simulated,
                 )
 
-        return redirect(url_for("positions"))
+        return redirect(_safe_next_url(form.get("next")) or url_for("positions"))
 
     @app.post("/positions/update/<int:position_id>")
     def update_position_view(position_id: int):
@@ -278,12 +318,12 @@ def create_app() -> Flask:
             parent_position_id=parent_id,
             strategy_tag=form.get("strategy_tag") or None,
         )
-        return redirect(url_for("positions"))
+        return redirect(_safe_next_url(form.get("next")) or url_for("positions"))
 
     @app.post("/positions/delete/<int:position_id>")
     def delete_position_view(position_id: int):
         delete_position(position_id=position_id)
-        return redirect(url_for("positions"))
+        return redirect(_safe_next_url(request.form.get("next")) or url_for("positions"))
 
     def _parse_form_float(value: str | None) -> float:
         if not value:
@@ -312,6 +352,14 @@ def create_app() -> Flask:
             return row[0] if row else None
         finally:
             conn.close()
+
+    def _safe_next_url(value: str | None) -> str | None:
+        if not value:
+            return None
+        candidate = value.strip()
+        if not candidate.startswith("/positions"):
+            return None
+        return candidate
 
     def _lookup_option_strike(ticker: str) -> float | None:
         """Recupera o strike do ticker de opção a partir do último snapshot."""

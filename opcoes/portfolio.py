@@ -303,6 +303,11 @@ def list_positions(
     include_closed: bool = False,
     ticker: Optional[str] = None,
     only_closed: bool = False,
+    ticker_contains: Optional[str] = None,
+    underlying_contains: Optional[str] = None,
+    strategy_tag: Optional[str] = None,
+    trade_type: Optional[str] = None,
+    is_simulated: Optional[bool] = None,
 ) -> List[dict]:
     conn = _connect()
     where: List[str] = []
@@ -314,6 +319,24 @@ def list_positions(
     if ticker:
         where.append("p.ticker = ?")
         params.append(_normalize_ticker(ticker))
+    if ticker_contains:
+        where.append("p.ticker LIKE ?")
+        params.append(f"%{_normalize_ticker(ticker_contains)}%")
+    if underlying_contains:
+        where.append("p.underlying LIKE ?")
+        params.append(f"%{_normalize_ticker(underlying_contains)}%")
+    if trade_type:
+        where.append("p.trade_type = ?")
+        params.append((trade_type or "").strip().lower())
+    if strategy_tag:
+        if strategy_tag == "__none__":
+            where.append("COALESCE(p.strategy_tag, '') = ''")
+        else:
+            where.append("p.strategy_tag = ?")
+            params.append((strategy_tag or "").strip())
+    if is_simulated is not None:
+        where.append("COALESCE(p.is_simulated, 0) = ?")
+        params.append(1 if is_simulated else 0)
     where_clause = f"WHERE {' AND '.join(where)}" if where else ""
     query = f"""
         SELECT

@@ -80,7 +80,7 @@
         <p>Nenhuma opção dentro do filtro de score.</p>
       {% else %}
         <p class="text-muted small">
-          Opções com <strong>preço de referência</strong> (ask, bid ou último negócio) entram no Top; se não houver book e só houver preço teórico, vão para “Oportunidades teóricas” como liquidez oculta.
+          Opções com <strong>ask</strong> visível entram no Top; sem ask, vão para “Oportunidades teóricas” (liquidez oculta), usando preço teórico/último como referência.
         </p>
         <div class="table-responsive">
           <table class="table table-sm table-striped align-middle">
@@ -592,6 +592,7 @@
                 <th class="text-end">Breakeven</th>
                 <th class="text-end">Score</th>
                 <th>Trend</th>
+                <th>Alertas</th>
               </tr>
             </thead>
             <tbody>
@@ -689,6 +690,7 @@
                 <th class="text-end">Breakeven</th>
                 <th class="text-end">Score</th>
                 <th>Trend</th>
+                <th>Alertas</th>
               </tr>
             </thead>
             <tbody>

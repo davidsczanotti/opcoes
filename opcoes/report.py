@@ -75,12 +75,16 @@ def generate_report(
     tradeable_opps: List[Dict[str, object]] = []
     theoretical_opps: List[Dict[str, object]] = []
     for opp in opportunities:
-        has_book_price = opp.get("best_ask") is not None or opp.get("best_bid") is not None
-        has_last = opp.get("ultimo") is not None
-        if has_book_price or has_last:
+        has_ask = opp.get("best_ask") is not None
+        has_theoretical = opp.get("preco_teorico") is not None
+        has_reference = opp.get("best_bid") is not None or opp.get("ultimo") is not None
+
+        if has_ask:
             tradeable_opps.append(opp)
-        elif opp.get("preco_teorico") is not None:
+        elif has_theoretical:
             theoretical_opps.append(opp)
+        elif has_reference:
+            tradeable_opps.append(opp)
 
     # Para oportunidades apenas teóricas (sem ask visível), a distorção de preço
     # deve refletir o desvio do último negócio em relação ao preço justo,

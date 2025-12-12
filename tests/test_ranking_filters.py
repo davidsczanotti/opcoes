@@ -69,6 +69,9 @@ def test_underlying_filter_contains_substring():
         option_type_filter="",
     )
 
-    # Only ABCD* should remain in opportunities and recurring_opportunities
+    # Only ABCD* should remain in all opportunity lists.
     assert {o["ticker"] for o in ctx["data"].opportunities} == {"ABCD1"}
+    assert {o["ticker"] for o in ctx["data"].theoretical_opportunities} == {"ABCD2"}
+    assert {o["ticker"] for o in ctx["data"].rational_opportunities} == {"ABCD3"}
+    assert {o["ticker"] for o in ctx["data"].lottery_opportunities} == {"ABCD4"}
     assert {o["ticker"] for o in ctx["data"].recurring_opportunities} == {"ABCD5"}

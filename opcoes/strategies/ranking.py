@@ -101,6 +101,19 @@ def _filter_by_type(items: List[Dict], opt_type: str | None) -> List[Dict]:
     return filtered
 
 
+def _filter_by_underlying(items: List[Dict], underlying_filter: str | None) -> List[Dict]:
+    if not underlying_filter:
+        return items
+    target = underlying_filter.strip().upper()
+    if not target:
+        return items
+    return [
+        o
+        for o in items
+        if target in (o.get("underlying") or "").upper() or target in (o.get("ticker") or "").upper()
+    ]
+
+
 def calculate_ranking_strategy(
     data: ReportData,
     min_score: int,
@@ -123,18 +136,11 @@ def calculate_ranking_strategy(
         data.recurring_opportunities = _filter_by_type(data.recurring_opportunities, option_type_filter)
 
     if underlying_filter:
-        data.opportunities = [
-            o
-            for o in data.opportunities
-            if underlying_filter in (o.get("underlying") or "").upper()
-            or underlying_filter in (o.get("ticker") or "").upper()
-        ]
-        data.recurring_opportunities = [
-            o
-            for o in data.recurring_opportunities
-            if underlying_filter in (o.get("underlying") or "").upper()
-            or underlying_filter in (o.get("ticker") or "").upper()
-        ]
+        data.opportunities = _filter_by_underlying(data.opportunities, underlying_filter)
+        data.theoretical_opportunities = _filter_by_underlying(data.theoretical_opportunities, underlying_filter)
+        data.rational_opportunities = _filter_by_underlying(data.rational_opportunities, underlying_filter)
+        data.lottery_opportunities = _filter_by_underlying(data.lottery_opportunities, underlying_filter)
+        data.recurring_opportunities = _filter_by_underlying(data.recurring_opportunities, underlying_filter)
 
     # Alert Processing
     alerts_map: Dict[int, List[str]] = {}
