@@ -24,6 +24,7 @@ class Transaction:
     amount: float
     description: Optional[str] = None
     position_id: Optional[int] = None  # Link opcional com uma posição específica
+    is_simulated: bool = False
 
 
 def _get_conn() -> sqlite3.Connection:
@@ -47,6 +48,14 @@ def _ensure_table(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    # Garantir colunas extras em versões antigas do banco
+    existing = {
+        row[1]
+        for row in conn.execute('PRAGMA table_info("ledger")').fetchall()
+        if row and len(row) > 1
+    }
+    if "is_simulated" not in existing:
+        conn.execute('ALTER TABLE ledger ADD COLUMN "is_simulated" INTEGER DEFAULT 0')
     conn.commit()
 
 
@@ -55,17 +64,18 @@ def add_transaction(
     type: TransactionType,
     amount: float,
     description: str = None,
-    position_id: int = None
+    position_id: int = None,
+    is_simulated: bool = False,
 ) -> int:
     """Registra uma transação financeira."""
     conn = _get_conn()
     try:
         cur = conn.execute(
             """
-            INSERT INTO ledger (date, type, amount, description, position_id)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO ledger (date, type, amount, description, position_id, is_simulated)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (date, type.value, amount, description, position_id),
+            (date, type.value, amount, description, position_id, 1 if is_simulated else 0),
         )
         conn.commit()
         return cur.lastrowid
@@ -73,11 +83,21 @@ def add_transaction(
         conn.close()
 
 
-def get_balance() -> float:
-    """Retorna o saldo total atual (soma de todas as transações)."""
+def get_balance(mode: str = "all") -> float:
+    """
+    Retorna o saldo atual.
+    mode: "all" (padrão), "real" (apenas não simuladas), "simulated" (apenas fictícias).
+    """
+    mode = (mode or "all").lower()
     conn = _get_conn()
     try:
-        row = conn.execute("SELECT SUM(amount) as total FROM ledger").fetchone()
+        where = ""
+        params: list[object] = []
+        if mode == "real":
+            where = "WHERE is_simulated = 0"
+        elif mode == "simulated":
+            where = "WHERE is_simulated = 1"
+        row = conn.execute(f"SELECT SUM(amount) as total FROM ledger {where}", params).fetchone()
         return row["total"] if row and row["total"] is not None else 0.0
     finally:
         conn.close()
@@ -91,7 +111,7 @@ def get_monthly_premiums(limit_months: int = 12) -> List[dict]:
         query = """
             SELECT strftime('%Y-%m', date) as month, SUM(amount) as total
             FROM ledger
-            WHERE type = ?
+            WHERE type = ? AND COALESCE(is_simulated, 0) = 0
             GROUP BY month
             ORDER BY month DESC
             LIMIT ?
@@ -118,8 +138,67 @@ def get_transactions(limit: int = 50) -> List[Transaction]:
                 amount=r["amount"],
                 description=r["description"],
                 position_id=r["position_id"],
+                is_simulated=bool(r["is_simulated"] or 0) if "is_simulated" in r.keys() else False,
             )
             for r in rows
         ]
+    finally:
+        conn.close()
+
+
+def update_transaction(
+    tx_id: int,
+    *,
+    date: Optional[str] = None,
+    type: Optional[TransactionType] = None,
+    amount: Optional[float] = None,
+    description: Optional[str] = None,
+    is_simulated: Optional[bool] = None,
+) -> None:
+    """Atualiza campos básicos de uma transação existente."""
+    fields = []
+    params: list[object] = []
+    if date is not None:
+        fields.append("date = ?")
+        params.append(date)
+    if type is not None:
+        if isinstance(type, TransactionType):
+            type_val = type.value
+        else:
+            type_val = str(type)
+        fields.append("type = ?")
+        params.append(type_val)
+    if amount is not None:
+        fields.append("amount = ?")
+        params.append(float(amount))
+    if description is not None:
+        fields.append("description = ?")
+        params.append(description)
+    if is_simulated is not None:
+        fields.append("is_simulated = ?")
+        params.append(1 if is_simulated else 0)
+    if not fields:
+        return
+
+    params.append(int(tx_id))
+    conn = _get_conn()
+    try:
+        cur = conn.execute(
+            f"UPDATE ledger SET {', '.join(fields)} WHERE id = ?",
+            params,
+        )
+        conn.commit()
+        if cur.rowcount == 0:
+            raise ValueError(f"Transação {tx_id} não encontrada.")
+    finally:
+        conn.close()
+
+
+def delete_transaction(tx_id: int) -> None:
+    """Remove uma transação do ledger."""
+    conn = _get_conn()
+    try:
+        conn.execute("DELETE FROM ledger WHERE id = ?", (int(tx_id),))
+        conn.commit()
     finally:
         conn.close()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from ..snapshot_repository import fetch_latest_underlying_options, fetch_latest_underlying_quote
@@ -48,48 +49,56 @@ def _premium_from_row(row: Mapping[str, Any]) -> Tuple[Optional[float], str]:
 
 
 def _calculate_portfolio_metrics(
+    *,
     spot: Optional[float],
     contract_size: int,
+    cash_mode: str,
+    puts_real: List[Dict[str, Any]],
+    puts_simulated: List[Dict[str, Any]],
 ) -> Dict[str, float]:
-    total_balance = finance.get_balance()
-    
-    # Calcula colateral travado em Puts vendidas
-    positions = list_positions(include_closed=False, only_closed=False)
+    # Caixa por modo
+    mode = (cash_mode or "real").lower()
+    if mode not in ("real", "simulated", "all"):
+        mode = "real"
+    total_balance = finance.get_balance(mode="all" if mode == "all" else mode)
+
+    # Colateral travado somente no modo selecionado
     collateral_locked = 0.0
-    for pos in positions:
-        ticker = (pos.get("ticker") or "").upper()
-        # Assume que só Puts precisam de colateral em dinheiro integral (CCP)
-        # Se não tiver tipo explícito, tentamos inferir.
-        if "PUT" in (infer_option_type(ticker) or ""):
-            # strike não está na tabela de positions diretamente, precisamos de um lookup ou assumir.
-            # No portfolio.py, 'entry_price' é o prêmio. O strike não é salvo explicitamente lá hoje.
-            # TODO: Melhorar portfolio para salvar strike. 
-            # Por enquanto, se não tiver strike, não somamos (ou usamos estimativa se possível).
-            # Para simplificar agora: vamos assumir que não conseguimos calcular exato sem strike na tabela positions.
-            # Mas espera! Temos `snapshot_repository`. Podemos tentar buscar o strike lá se for recente.
-            pass
-            
-    # Como não temos strike na tabela positions, vamos simplificar:
-    # O usuário terá que confiar no saldo "Livre" que ele gerencia, ou precisamos melhorar `portfolio`.
-    # Vamos deixar o cálculo de colateral para uma iteração futura onde `positions` tenha `strike`.
-    # Por hora, retornamos o saldo do Ledger e, se possível, a capacidade em lotes do ativo.
+    source_positions: List[Dict[str, Any]]
+    if mode == "simulated":
+        source_positions = puts_simulated
+    elif mode == "real":
+        source_positions = puts_real
+    else:
+        source_positions = puts_real + puts_simulated
+
+    for pos in source_positions:
+        strike = pos.get("strike") or 0.0
+        open_qty = pos.get("open_qty") or 0
+        try:
+            if strike and open_qty:
+                collateral_locked += float(strike) * int(open_qty)
+        except Exception:
+            continue
+
+    available_cash = total_balance - collateral_locked
 
     max_shares: Optional[int] = None
     max_lots: Optional[int] = None
     try:
-        if spot is not None and spot > 0 and contract_size > 0 and total_balance > 0:
-            max_shares = int(total_balance // spot)
-            max_lots = int(total_balance // (spot * contract_size))
+        if spot is not None and spot > 0 and contract_size > 0 and available_cash > 0:
+            max_shares = int(available_cash // spot)
+            max_lots = int(available_cash // (spot * contract_size))
     except Exception:
         max_shares = None
         max_lots = None
 
     return {
         "total_cash": float(total_balance),
+        "available_cash": float(available_cash),
+        "collateral_locked": float(collateral_locked),
         "max_shares": max_shares,
         "max_lots": max_lots,
-        # "collateral_locked": collateral_locked,
-        # "buying_power": total_balance - collateral_locked
     }
 
 
@@ -185,6 +194,87 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
     max_days = _get_int_arg(args, "max_days", defaults.max_days)
     contract_size = max(_get_int_arg(args, "contract_size", defaults.contract_size), 1)
     limit = _get_int_arg(args, "limit", defaults.limit)
+    cash_mode = (args.get("cash_mode") or defaults.cash_mode).strip().lower()
+
+    # Buscar posições abertas de Puts (Real vs Simulado)
+    all_positions = list_positions(include_closed=False)
+    puts_real = []
+    puts_simulated = []
+    
+    # Agregador de prêmios simulados
+    sim_premiums_agg: Dict[str, float] = {}
+
+    for pos in all_positions:
+        ticker = (pos.get("ticker") or "").upper()
+        # Se trade_type for "stock", ignora. Se não tiver trade_type explícito, tenta inferir.
+        # Mas `list_positions` retorna o que está no banco.
+        # Vamos checar se é PUT.
+        if infer_option_type(ticker) == "PUT":
+            # Filtra pelo underlying se estiver definido na view
+            pos_underlying = (pos.get("underlying") or "").upper()
+            if underlying and pos_underlying != underlying:
+                continue
+            
+            # Enrich position with Cash-Put specific metrics
+            strike = pos.get("strike")
+            entry = pos.get("entry_price") or 0.0
+            qty = pos.get("qty") or 0
+            fees = pos.get("fees") or 0.0
+            spot = pos.get("underlying_price")
+
+            stock_be = None
+            dist_be = None
+            projected_outcome = None
+            collateral_yield_pct = None
+            
+            if strike and entry:
+                stock_be = strike - entry
+                try:
+                    if strike > 0:
+                        # Aproximação do retorno sobre o capital imobilizado:
+                        # (prêmio / strike) * 100, equivalente a
+                        # (prêmio_total / capital_imobilizado) * 100.
+                        collateral_yield_pct = (entry / strike) * 100.0
+                except Exception:
+                    collateral_yield_pct = None
+
+                if spot and spot > 0:
+                    dist_be = (spot - stock_be) / spot * 100.0
+                    # Resultado financeiro se exercido no preço atual (ou expirado)
+                    # Se Spot < Strike: Exercido. Resultado = (Spot - Strike) + Premium
+                    # Se Spot >= Strike: Expira pó. Resultado = Premium
+                    if spot < strike:
+                        outcome_per_share = (spot - strike) + entry
+                    else:
+                        outcome_per_share = entry
+                    
+                    projected_outcome = (outcome_per_share * qty) - fees
+
+            pos["stock_breakeven"] = stock_be
+            pos["dist_be_pct"] = dist_be
+            pos["projected_outcome"] = projected_outcome
+            pos["collateral_yield_pct"] = collateral_yield_pct
+
+            if pos.get("is_simulated"):
+                puts_simulated.append(pos)
+                # Soma prêmios simulados por mês
+                t_date = pos.get("trade_date")
+                if t_date:
+                    try:
+                        # Parse YYYY-MM-DD
+                        dt = datetime.date.fromisoformat(t_date)
+                        m_key = dt.strftime("%Y-%m")
+                        val = (entry * qty) - fees
+                        sim_premiums_agg[m_key] = sim_premiums_agg.get(m_key, 0.0) + val
+                    except ValueError:
+                        pass
+            else:
+                puts_real.append(pos)
+    
+    # Formata lista de prêmios simulados (ordenada desc)
+    simulated_monthly_premiums = []
+    for m in sorted(sim_premiums_agg.keys(), reverse=True):
+        simulated_monthly_premiums.append({"month": m, "total": sim_premiums_agg[m]})
 
     rows = fetch_latest_underlying_options(underlying=underlying)
     suggestions = _build_put_suggestions(
@@ -207,6 +297,7 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
             max_days=max_days,
             contract_size=contract_size,
             limit=limit,
+            cash_mode=cash_mode,
         )
 
     spot_price: Optional[float] = None
@@ -216,13 +307,23 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         except (TypeError, ValueError):
             spot_price = None
 
-    finance_metrics = _calculate_portfolio_metrics(spot=spot_price, contract_size=contract_size)
+    finance_metrics = _calculate_portfolio_metrics(
+        spot=spot_price,
+        contract_size=contract_size,
+        cash_mode=cash_mode,
+        puts_real=puts_real,
+        puts_simulated=puts_simulated,
+    )
     monthly_premiums = finance.get_monthly_premiums()
     transactions = finance.get_transactions(limit=10)
 
     return {
         "underlying": underlying,
         "underlying_quote": quote,
+        "puts_real": puts_real,
+        "puts_simulated": puts_simulated,
+        "simulated_monthly_premiums": simulated_monthly_premiums,
+        "cash_mode": cash_mode,
         "filters": {
             "min_yield_pct": min_yield_pct,
             "min_buffer_pct": min_buffer_pct,

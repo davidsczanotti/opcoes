@@ -24,76 +24,90 @@
     </nav>
 
     <div class="container-fluid">
-      <h1 class="h4 mb-3">Posições</h1>
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1 class="h4 mb-0">Posições</h1>
+        <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#modalAddPosition">
+          + Nova Posição
+        </button>
+      </div>
 
-      <div class="card mb-4">
-        <div class="card-header">Cadastrar nova posição</div>
-        <div class="card-body">
-          <form method="post" action="/positions/add" class="row gy-2 gx-3 align-items-end">
-            <div class="col-md-2">
-              <label class="form-label small">Ticker</label>
-              <input name="ticker" class="form-control form-control-sm" required>
+      <!-- Modal Add Position -->
+      <div class="modal fade" id="modalAddPosition" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title">Cadastrar nova posição</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
-            <div class="col-md-2">
-              <label class="form-label small">Ativo (auto)</label>
-              <input name="underlying" class="form-control form-control-sm" placeholder="auto">
+            <div class="modal-body">
+              <form method="post" action="/positions/add" class="row g-3">
+                <div class="col-md-3">
+                  <label class="form-label small">Ticker</label>
+                  <input name="ticker" class="form-control form-control-sm" required>
+                </div>
+                <div class="col-md-3">
+                  <label class="form-label small">Ativo (auto)</label>
+                  <input name="underlying" class="form-control form-control-sm" placeholder="auto">
+                </div>
+                <div class="col-md-3">
+                  <label class="form-label small">Data (YYYY-MM-DD)</label>
+                  <input name="trade_date" class="form-control form-control-sm" required>
+                </div>
+                <div class="col-md-3">
+                  <label class="form-label small">Simulado?</label>
+                  <select name="is_simulated" class="form-select form-select-sm">
+                    <option value="0">Não (real)</option>
+                    <option value="1">Sim (fictício)</option>
+                  </select>
+                </div>
+                <div class="col-md-3">
+                  <label class="form-label small">Qtd</label>
+                  <input name="qty" type="number" min="1" class="form-control form-control-sm" required>
+                </div>
+                <div class="col-md-3">
+                  <label class="form-label small">Preço</label>
+                  <input name="entry_price" type="number" step="0.01" class="form-control form-control-sm" required>
+                </div>
+                <div class="col-md-3">
+                  <label class="form-label small">Taxas</label>
+                  <input name="fees" type="number" step="0.01" class="form-control form-control-sm">
+                </div>
+                 <div class="col-md-3">
+                  <label class="form-label small">IRRF</label>
+                  <input name="irrf" type="number" step="0.01" class="form-control form-control-sm" placeholder="opcional">
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label small">Tipo</label>
+                  <select name="trade_type" class="form-select form-select-sm">
+                    <option value="swing">swing</option>
+                    <option value="daytrade">day trade</option>
+                  </select>
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label small">Estratégia</label>
+                  <select name="strategy_tag" class="form-select form-select-sm">
+                    <option value="">-</option>
+                    <option value="cash_put">Cash-Covered Put</option>
+                    <option value="covered_call">Covered Call</option>
+                    <option value="ranking">Aposta / Ranking</option>
+                    <option value="outro">Outro</option>
+                  </select>
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label small">Lote pai (ID)</label>
+                  <input name="parent_position_id" type="number" min="1" class="form-control form-control-sm" placeholder="opcional">
+                </div>
+                <div class="col-12">
+                  <label class="form-label small">Notas</label>
+                  <input name="notes" class="form-control form-control-sm" placeholder="Observações">
+                </div>
+                <div class="col-12 text-end">
+                  <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                  <button class="btn btn-primary btn-sm" type="submit">Adicionar</button>
+                </div>
+              </form>
             </div>
-            <div class="col-md-2">
-              <label class="form-label small">Data (YYYY-MM-DD)</label>
-              <input name="trade_date" class="form-control form-control-sm" required>
-            </div>
-            <div class="col-md-1">
-              <label class="form-label small">Qtd</label>
-              <input name="qty" type="number" min="1" class="form-control form-control-sm" required>
-            </div>
-            <div class="col-md-1">
-              <label class="form-label small">Preço</label>
-              <input name="entry_price" type="number" step="0.01" class="form-control form-control-sm" required>
-            </div>
-            <div class="col-md-1">
-              <label class="form-label small">Taxas</label>
-              <input name="fees" type="number" step="0.01" class="form-control form-control-sm">
-            </div>
-            <div class="col-md-2">
-              <label class="form-label small">Tipo</label>
-              <select name="trade_type" class="form-select form-select-sm">
-                <option value="swing">swing</option>
-                <option value="daytrade">day trade</option>
-              </select>
-            </div>
-            <div class="col-md-2">
-              <label class="form-label small">Estratégia</label>
-              <select name="strategy_tag" class="form-select form-select-sm">
-                <option value="">-</option>
-                <option value="cash_put">Cash-Covered Put</option>
-                <option value="covered_call">Covered Call</option>
-                <option value="ranking">Aposta / Ranking</option>
-                <option value="outro">Outro</option>
-              </select>
-            </div>
-            <div class="col-md-2">
-              <label class="form-label small">Simulado?</label>
-              <select name="is_simulated" class="form-select form-select-sm">
-                <option value="0">Não (real)</option>
-                <option value="1">Sim (fictício)</option>
-              </select>
-            </div>
-            <div class="col-md-2">
-              <label class="form-label small">Lote pai (ID)</label>
-              <input name="parent_position_id" type="number" min="1" class="form-control form-control-sm" placeholder="opcional">
-            </div>
-            <div class="col-md-2">
-              <label class="form-label small">IRRF</label>
-              <input name="irrf" type="number" step="0.01" class="form-control form-control-sm" placeholder="opcional">
-            </div>
-            <div class="col-12">
-              <label class="form-label small">Notas</label>
-              <input name="notes" class="form-control form-control-sm" placeholder="Observações">
-            </div>
-            <div class="col-12">
-              <button class="btn btn-primary btn-sm" type="submit">Adicionar</button>
-            </div>
-          </form>
+          </div>
         </div>
       </div>
 
@@ -101,7 +115,7 @@
         <p>Nenhuma posição registrada.</p>
       {% else %}
         <div class="table-responsive">
-          <table class="table table-sm table-striped align-middle" style="min-width: 1400px;">
+          <table class="table table-sm table-striped align-middle">
             <thead class="table-light align-middle">
               <tr>
                 <th>ID</th>
@@ -130,7 +144,7 @@
             </thead>
             <tbody>
               {% for pos in positions %}
-                <tr>
+                <tr class="{% if pos.is_simulated %}table-warning{% endif %}">
                   <form method="post" action="/positions/update/{{ pos.id }}">
                     <td>{{ pos.id }}</td>
                     <td style="min-width: 90px;"><input name="ticker" class="form-control form-control-sm" value="{{ pos.ticker }}" readonly></td>
@@ -173,10 +187,10 @@
                     <td class="text-end">
                       {% if pos.last_price is not none %}{{ "%.2f"|format(pos.last_price) }}{% else %}-{% endif %}
                     </td>
-                    <td class="text-end">
+                    <td class="text-end {% if pos.pl and pos.pl > 0 %}text-success{% elif pos.pl and pos.pl < 0 %}text-danger{% endif %} fw-semibold">
                       {% if pos.pl is not none %}{{ "%.2f"|format(pos.pl) }}{% else %}-{% endif %}
                     </td>
-                    <td class="text-end">
+                    <td class="text-end {% if pos.pl_pct and pos.pl_pct > 0 %}text-success{% elif pos.pl_pct and pos.pl_pct < 0 %}text-danger{% endif %} fw-semibold">
                       {% if pos.pl_pct is not none %}{{ "%.2f"|format(pos.pl_pct) }}%{% else %}-{% endif %}
                     </td>
                     <td class="text-end">
@@ -186,7 +200,7 @@
                       {% if pos.score_total is not none %}{{ "%.2f"|format(pos.score_total) }}{% else %}-{% endif %}
                     </td>
                     <td>{{ pos.trend_flag or '-' }}</td>
-                    <td class="text-end">
+                    <td class="text-end {% if pos.realized_pl and pos.realized_pl > 0 %}text-success{% elif pos.realized_pl and pos.realized_pl < 0 %}text-danger{% endif %} fw-semibold">
                       {% if pos.realized_pl is not none %}{{ "%.2f"|format(pos.realized_pl) }}{% else %}-{% endif %}
                     </td>
                     <td style="min-width: 260px;">
@@ -256,5 +270,14 @@
         </div>
       {% endif %}
     </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+      // Preencher data atual no modal
+      const dateInput = document.querySelector('#modalAddPosition input[name="trade_date"]');
+      if (dateInput) {
+          dateInput.value = new Date().toISOString().split('T')[0];
+      }
+    </script>
   </body>
 </html>

@@ -46,6 +46,7 @@ def create_app() -> Flask:
         type_str = form.get("type")
         desc = form.get("description") or "Movimentação manual"
         date = form.get("date") or datetime.date.today().isoformat()
+        is_simulated = form.get("is_simulated") == "1"
         
         # Valid transaction type
         try:
@@ -61,7 +62,8 @@ def create_app() -> Flask:
             date=date,
             type=tx_type,
             amount=amount,
-            description=desc
+            description=desc,
+            is_simulated=is_simulated,
         )
         return redirect(url_for("cash_covered_put"))
 
@@ -72,6 +74,9 @@ def create_app() -> Flask:
         strike = _parse_form_float(form.get("strike"))
         qty = int(form.get("qty"))
         date = form.get("date") or datetime.date.today().isoformat()
+
+        pos = get_position(position_id)
+        is_simulated = bool(pos["is_simulated"]) if pos else False
         
         # 1. Close the PUT position
         # Assuming exit price 0 or current market price? Usually 0 if exercised ITM? 
@@ -86,12 +91,12 @@ def create_app() -> Flask:
             type=finance.TransactionType.ASSIGNMENT,
             amount=-cost,
             description=f"Exercício PUT {position_id} @ {strike}",
-            position_id=position_id
+            position_id=position_id,
+            is_simulated=is_simulated,
         )
 
         # 3. Open STOCK position (optional, but good for tracking)
         # We need the underlying ticker.
-        pos = get_position(position_id)
         if pos:
             add_position(
                 ticker=pos["underlying"], # Now we own the stock
@@ -105,6 +110,41 @@ def create_app() -> Flask:
                 parent_position_id=position_id
             )
 
+        return redirect(url_for("cash_covered_put"))
+
+    @app.post("/finance/update/<int:tx_id>")
+    def finance_update(tx_id: int):
+        form = request.form
+        date = form.get("date") or None
+        type_str = form.get("type") or None
+        desc = form.get("description") or None
+        amount = _parse_form_float(form.get("amount"))
+        is_simulated = form.get("is_simulated") == "1"
+
+        tx_type = None
+        if type_str:
+            try:
+                tx_type = finance.TransactionType(type_str)
+            except ValueError:
+                tx_type = None
+
+        # mesma regra: retirada em valor positivo vira negativo
+        if tx_type == finance.TransactionType.WITHDRAWAL and amount > 0:
+            amount = -amount
+
+        finance.update_transaction(
+            tx_id,
+            date=date,
+            type=tx_type,
+            amount=amount,
+            description=desc,
+            is_simulated=is_simulated,
+        )
+        return redirect(url_for("cash_covered_put"))
+
+    @app.post("/finance/delete/<int:tx_id>")
+    def finance_delete(tx_id: int):
+        finance.delete_transaction(tx_id)
         return redirect(url_for("cash_covered_put"))
 
     @app.route("/settings", methods=["GET", "POST"])
@@ -178,7 +218,7 @@ def create_app() -> Flask:
         )
 
         # Se for venda de opção (PUT ou CALL) e não simulado, registra o prêmio no caixa
-        if not is_simulated and entry_price > 0:
+        if entry_price > 0:
             # Simplificação: se tem "trade_type" swing/daytrade, assumimos venda? 
             # Melhor checar se é option. infer_option_type não está importado aqui, mas podemos assumir pelo ticker.
             # Se for short position (venda), entra dinheiro.
@@ -198,7 +238,8 @@ def create_app() -> Flask:
                     type=finance.TransactionType.PREMIUM,
                     amount=total_premium,
                     description=f"Prêmio {ticker} ({qty}x)",
-                    position_id=pos_id
+                    position_id=pos_id,
+                    is_simulated=is_simulated,
                 )
 
         return redirect(url_for("positions"))

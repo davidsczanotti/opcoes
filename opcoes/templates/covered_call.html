@@ -383,10 +383,10 @@
                   <td class="text-end">
                     {% if pos.pct_2x is not none %}{{ "%.2f"|format(pos.pct_2x) }}{% else %}-{% endif %}
                   </td>
-                  <td class="text-end">
+                  <td class="text-end {% if pos.pl and pos.pl > 0 %}text-success{% elif pos.pl and pos.pl < 0 %}text-danger{% endif %} fw-semibold">
                     {% if pos.pl is not none %}{{ "%.2f"|format(pos.pl) }}{% else %}-{% endif %}
                   </td>
-                  <td class="text-end">
+                  <td class="text-end {% if pos.pl_pct and pos.pl_pct > 0 %}text-success{% elif pos.pl_pct and pos.pl_pct < 0 %}text-danger{% endif %} fw-semibold">
                     {% if pos.pl_pct is not none %}{{ "%.2f"|format(pos.pl_pct) }}%{% else %}-{% endif %}
                   </td>
                 </tr>
@@ -435,10 +435,10 @@
                   <td class="text-end">
                     {% if pos.pct_2x is not none %}{{ "%.2f"|format(pos.pct_2x) }}{% else %}-{% endif %}
                   </td>
-                  <td class="text-end">
+                  <td class="text-end {% if pos.pl and pos.pl > 0 %}text-success{% elif pos.pl and pos.pl < 0 %}text-danger{% endif %} fw-semibold">
                     {% if pos.pl is not none %}{{ "%.2f"|format(pos.pl) }}{% else %}-{% endif %}
                   </td>
-                  <td class="text-end">
+                  <td class="text-end {% if pos.pl_pct and pos.pl_pct > 0 %}text-success{% elif pos.pl_pct and pos.pl_pct < 0 %}text-danger{% endif %} fw-semibold">
                     {% if pos.pl_pct is not none %}{{ "%.2f"|format(pos.pl_pct) }}%{% else %}-{% endif %}
                   </td>
                 </tr>

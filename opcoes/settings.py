@@ -31,6 +31,7 @@ class CashCoveredPutSettings:
     max_days: int = 120
     contract_size: int = 100
     limit: int = 50
+    cash_mode: str = "real"
 
 
 @dataclass
@@ -146,6 +147,7 @@ def get_cash_put_settings() -> CashCoveredPutSettings:
             return default
 
     underlying = raw.get("cash_put_underlying", "").strip().upper() or "PETR4"
+    cash_mode = raw.get("cash_put_cash_mode", "real").strip().lower() or "real"
 
     return CashCoveredPutSettings(
         underlying=underlying,
@@ -155,6 +157,7 @@ def get_cash_put_settings() -> CashCoveredPutSettings:
         max_days=_parse_int("cash_put_max_days", 120),
         contract_size=_parse_int("cash_put_contract_size", 100),
         limit=_parse_int("cash_put_limit", 50),
+        cash_mode=cash_mode,
     )
 
 
@@ -264,6 +267,7 @@ def update_cash_put_settings(
     max_days: int,
     contract_size: int,
     limit: int,
+    cash_mode: str,
 ) -> None:
     conn = _connect()
     try:
@@ -275,6 +279,7 @@ def update_cash_put_settings(
             "cash_put_max_days": int(max_days),
             "cash_put_contract_size": int(contract_size),
             "cash_put_limit": int(limit),
+            "cash_put_cash_mode": (cash_mode or "real").strip().lower() or "real",
         }
         for key, value in params.items():
             conn.execute(
