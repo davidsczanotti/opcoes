@@ -80,7 +80,7 @@
         <p>Nenhuma opção dentro do filtro de score.</p>
       {% else %}
         <p class="text-muted small">
-          Apenas opções com <strong>ask presente</strong> no book entram no Top; as oportunidades apenas teóricas (liquidez oculta) aparecem em uma seção separada.
+          Opções com <strong>preço de referência</strong> (ask, bid ou último negócio) entram no Top; se não houver book e só houver preço teórico, vão para “Oportunidades teóricas” como liquidez oculta.
         </p>
         <div class="table-responsive">
           <table class="table table-sm table-striped align-middle">
@@ -126,7 +126,7 @@
                     {% if opp.ultimo is not none %}{{ "%.2f"|format(opp.ultimo) }}{% else %}-{% endif %}
                   </td>
                   <td class="text-end">
-                    {% set ref_price = opp.best_ask if opp.best_ask is not none else opp.preco_teorico %}
+                    {% set ref_price = opp.best_ask if opp.best_ask is not none else (opp.best_bid if opp.best_bid is not none else (opp.ultimo if opp.ultimo is not none else opp.preco_teorico)) %}
                     {% if ref_price is not none %}
                       {% if opp.preco_max_20_pct is not none and ref_price > opp.preco_max_20_pct %}
                         <span class="text-danger fw-semibold" title="Acima do teto de 20% sobre o preço teórico.">{{ "%.2f"|format(ref_price) }}</span>
@@ -170,8 +170,8 @@
                   <td class="text-end">
                     {% if opp.illiquidez_flag %}
                       <span class="badge text-bg-warning">Illiq</span>
-                    {% elif opp.best_ask is none and opp.preco_teorico is not none %}
-                      <span class="badge text-bg-info" title="Preço de tela desatualizado; tente ordem limitada perto do preço justo.">Liquidez oculta</span>
+                    {% elif (opp.best_ask is none and opp.best_bid is none) %}
+                      <span class="badge text-bg-info" title="Sem book visível; use preço limite perto do justo/último.">Liquidez oculta</span>
                     {% else %}
                       -
                     {% endif %}
@@ -489,26 +489,25 @@
                     <td class="text-end">
                       {% if opp.score_total is not none %}{{ "%.2f"|format(opp.score_total) }}{% else %}-{% endif %}
                     </td>
-                    <td class="text-end">
-                      {% if opp.best_ask is not none %}
-                        {{ "%.2f"|format(opp.best_ask) }}
-                      {% elif opp.preco_teorico is not none %}
-                        {{ "%.2f"|format(opp.preco_teorico) }}
-                      {% else %}
-                        -
-                      {% endif %}
-                    </td>
+                  <td class="text-end">
+                    {% set ref_price = opp.best_ask if opp.best_ask is not none else (opp.best_bid if opp.best_bid is not none else (opp.ultimo if opp.ultimo is not none else opp.preco_teorico)) %}
+                    {% if ref_price is not none %}
+                      {{ "%.2f"|format(ref_price) }}
+                    {% else %}
+                      -
+                    {% endif %}
+                  </td>
                     <td class="text-end">
                       {% if opp.spread_pct is not none %}{{ "%.1f"|format(opp.spread_pct) }}%{% else %}-{% endif %}
                     </td>
                     <td class="text-end">
-                      {% if opp.illiquidez_flag %}
-                        <span class="badge text-bg-warning">Illiq</span>
-                      {% elif opp.best_ask is none and opp.preco_teorico is not none %}
-                        <span class="badge text-bg-info" title="Preço de tela desatualizado; tente ordem limitada perto do preço justo.">Liquidez oculta</span>
-                      {% else %}
-                        -
-                      {% endif %}
+                    {% if opp.illiquidez_flag %}
+                      <span class="badge text-bg-warning">Illiq</span>
+                    {% elif (opp.best_ask is none and opp.best_bid is none) %}
+                      <span class="badge text-bg-info" title="Sem book visível; use preço limite perto do justo/último.">Liquidez oculta</span>
+                    {% else %}
+                      -
+                    {% endif %}
                     </td>
                     <td class="text-end">
                       {% if opp.vol_impl_perc is not none %}{{ "%.2f"|format(opp.vol_impl_perc) }}{% else %}-{% endif %}

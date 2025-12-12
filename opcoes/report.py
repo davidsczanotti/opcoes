@@ -41,7 +41,9 @@ def generate_report(
     if not snapshot_date:
         conn.close()
         raise RuntimeError("Nenhum snapshot encontrado. Rode o scraper primeiro.")
-    opportunities = _fetch_opportunities(conn, snapshot_date, min_score, limit)
+    # Busca mais linhas que o limite final para não ficar sem opções negociáveis
+    fetch_limit = max(limit * 5, limit)
+    opportunities = _fetch_opportunities(conn, snapshot_date, min_score, fetch_limit)
     hv_map = _compute_hv_map(conn, snapshot_date, [o.get("underlying", "") for o in opportunities], hv_days)
     for opp in opportunities:
         underlying = (opp.get("underlying") or "").strip().upper()
@@ -73,7 +75,9 @@ def generate_report(
     tradeable_opps: List[Dict[str, object]] = []
     theoretical_opps: List[Dict[str, object]] = []
     for opp in opportunities:
-        if opp.get("best_ask") is not None:
+        has_book_price = opp.get("best_ask") is not None or opp.get("best_bid") is not None
+        has_last = opp.get("ultimo") is not None
+        if has_book_price or has_last:
             tradeable_opps.append(opp)
         elif opp.get("preco_teorico") is not None:
             theoretical_opps.append(opp)
@@ -104,6 +108,8 @@ def generate_report(
 
     tradeable_opps.sort(key=_score_key, reverse=True)
     theoretical_opps.sort(key=_score_key, reverse=True)
+    tradeable_opps = tradeable_opps[:limit]
+    theoretical_opps = theoretical_opps[:limit]
 
     rational_opps, lottery_opps = _split_remote_lists(tradeable_opps, limit=5)
 
