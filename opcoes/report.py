@@ -522,6 +522,10 @@ def _adjust_long_call_scores(opps: List[Dict[str, object]]) -> None:
     """
 
     for opp in opps:
+        opt_type = (opp.get("option_type") or "").strip().upper()
+        # Ajuste apenas para CALL; PUTs mantêm o score original.
+        if opt_type and opt_type != "CALL":
+            continue
         base = opp.get("score_total")
         if base is None:
             continue
