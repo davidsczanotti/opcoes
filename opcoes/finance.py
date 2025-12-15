@@ -13,6 +13,7 @@ class TransactionType(str, Enum):
     PREMIUM = "PREMIUM"      # Prêmio recebido de venda de opção
     ASSIGNMENT = "ASSIGN"    # Custo de exercício (compra da ação)
     BUY = "BUY"              # Compra direta de ativo
+    SELL = "SELL"            # Venda direta de ativo
     DIVIDEND = "DIVIDEND"    # Dividendos recebidos
 
 

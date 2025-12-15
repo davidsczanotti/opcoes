@@ -362,6 +362,7 @@
                 <th class="text-end">% p/ 2x</th>
                 <th class="text-end">P/L</th>
                 <th class="text-end">P/L%</th>
+                <th class="text-end">Ações</th>
               </tr>
             </thead>
             <tbody>
@@ -389,6 +390,22 @@
                   <td class="text-end {% if pos.pl_pct and pos.pl_pct > 0 %}text-success{% elif pos.pl_pct and pos.pl_pct < 0 %}text-danger{% endif %} fw-semibold">
                     {% if pos.pl_pct is not none %}{{ "%.2f"|format(pos.pl_pct) }}%{% else %}-{% endif %}
                   </td>
+                  <td class="text-end">
+                    {% if pos.id and pos.open_qty and pos.strike is not none and pos.parent_position_id is not none %}
+                      <form method="post" action="/finance/callaway" class="d-inline">
+                        <input type="hidden" name="position_id" value="{{ pos.id }}">
+                        <button
+                          type="submit"
+                          class="btn btn-outline-primary btn-sm"
+                          onclick="return confirm('Confirmar exercício da call {{ pos.ticker }}?');"
+                        >
+                          Exercido
+                        </button>
+                      </form>
+                    {% else %}
+                      -
+                    {% endif %}
+                  </td>
                 </tr>
               {% endfor %}
             </tbody>
@@ -414,6 +431,7 @@
                 <th class="text-end">% p/ 2x</th>
                 <th class="text-end">P/L</th>
                 <th class="text-end">P/L%</th>
+                <th class="text-end">Ações</th>
               </tr>
             </thead>
             <tbody>
@@ -440,6 +458,22 @@
                   </td>
                   <td class="text-end {% if pos.pl_pct and pos.pl_pct > 0 %}text-success{% elif pos.pl_pct and pos.pl_pct < 0 %}text-danger{% endif %} fw-semibold">
                     {% if pos.pl_pct is not none %}{{ "%.2f"|format(pos.pl_pct) }}%{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if pos.id and pos.open_qty and pos.strike is not none and pos.parent_position_id is not none %}
+                      <form method="post" action="/finance/callaway" class="d-inline">
+                        <input type="hidden" name="position_id" value="{{ pos.id }}">
+                        <button
+                          type="submit"
+                          class="btn btn-outline-primary btn-sm"
+                          onclick="return confirm('Confirmar exercício da call {{ pos.ticker }}?');"
+                        >
+                          Exercido
+                        </button>
+                      </form>
+                    {% else %}
+                      -
+                    {% endif %}
                   </td>
                 </tr>
               {% endfor %}

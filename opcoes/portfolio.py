@@ -4,7 +4,7 @@ import sqlite3
 from typing import Iterable, List, Optional
 
 from .config import get_db_path
-from .scraper.storage import _ensure_parent
+from .scraper.storage import _ensure_parent, _parse_ptbr_number
 
 
 def _connect() -> sqlite3.Connection:
@@ -371,17 +371,13 @@ def list_positions(
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
-    def parse_decimal(value: Optional[str]) -> Optional[float]:
-        if value is None:
+    def parse_decimal(value: object) -> Optional[float]:
+        parsed = _parse_ptbr_number(value)
+        if parsed is None:
             return None
-        value = value.strip()
-        if not value:
-            return None
-        value = value.replace("%", "").replace("+", "").replace("\u2212", "-").replace("−", "-")
-        value = value.replace(".", "").replace(",", ".")
         try:
-            return float(value)
-        except ValueError:
+            return float(parsed)
+        except (TypeError, ValueError):
             return None
 
     def parse_int(value: Optional[str]) -> Optional[int]:

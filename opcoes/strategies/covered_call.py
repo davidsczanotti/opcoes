@@ -148,7 +148,7 @@ def _call_cashflow_summaries(
 
     summaries: List[Dict] = []
     for pos in call_positions:
-        qty = int(pos.get("qty") or 0)
+        qty = int(pos.get("open_qty") or pos.get("qty") or 0)
         if qty <= 0:
             continue
         trade_type = (pos.get("trade_type") or "swing").strip().lower()
@@ -200,8 +200,11 @@ def _call_cashflow_summaries(
 
         summaries.append(
             {
+                "position_id": pos.get("id"),
+                "lot_id": pos.get("parent_position_id"),
                 "ticker": pos.get("ticker"),
                 "qty": qty,
+                "open_qty": qty,
                 "strike": strike,
                 "avg_cost": avg_cost,
                 "premium_bruto": premium_bruto,

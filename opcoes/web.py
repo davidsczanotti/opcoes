@@ -9,6 +9,7 @@ from flask import Flask, redirect, render_template, request, url_for
 from .config import get_db_path
 from .portfolio import add_position, delete_position, list_positions, update_position, close_position, get_position
 from .scraper.storage import _parse_ptbr_number
+from .utils import infer_option_type
 from .settings import (
     FeeSettings,
     StrategySettings,
@@ -107,11 +108,129 @@ def create_app() -> Flask:
                 fees=0.0,  # Taxas podem ser lançadas manualmente depois
                 trade_type="stock",
                 notes=f"Exercício da opção {pos['ticker']}",
+                is_simulated=is_simulated,
                 parent_position_id=position_id,
                 strategy_tag="covered_call",
             )
 
         return redirect(url_for("cash_covered_put"))
+
+    @app.post("/finance/callaway")
+    def finance_callaway():
+        form = request.form
+        position_id = int(form.get("position_id"))
+        date = form.get("date") or datetime.date.today().isoformat()
+
+        call_pos = get_position(position_id)
+        if not call_pos:
+            return redirect(url_for("covered_call"))
+
+        underlying = (call_pos.get("underlying") or "").strip().upper()
+        is_simulated = bool(call_pos.get("is_simulated") or 0)
+
+        if (call_pos.get("status") or "").strip().lower() != "open":
+            return redirect(url_for("covered_call", underlying=underlying))
+
+        if infer_option_type(call_pos.get("ticker")) != "CALL":
+            return redirect(url_for("covered_call", underlying=underlying))
+
+        # Para exercício, usamos a quantidade em aberto da CALL e o strike do último snapshot.
+        try:
+            qty = int(call_pos.get("open_qty") or call_pos.get("qty") or 0)
+        except (TypeError, ValueError):
+            qty = 0
+        strike = call_pos.get("strike")
+
+        if qty <= 0 or strike is None:
+            return redirect(url_for("covered_call", underlying=underlying))
+
+        lot_id = call_pos.get("parent_position_id")
+        if lot_id is None:
+            # Sem vínculo com lote: não dá para dar baixa das ações com segurança.
+            return redirect(url_for("covered_call", underlying=underlying))
+
+        lot_pos = get_position(int(lot_id))
+        if not lot_pos:
+            return redirect(url_for("covered_call", underlying=underlying))
+
+        if (lot_pos.get("status") or "").strip().lower() != "open":
+            return redirect(url_for("covered_call", underlying=underlying))
+
+        if bool(lot_pos.get("is_simulated") or 0) != is_simulated:
+            return redirect(url_for("covered_call", underlying=underlying))
+
+        lot_ticker = (lot_pos.get("ticker") or "").strip().upper()
+        if underlying and lot_ticker and lot_ticker != underlying:
+            return redirect(url_for("covered_call", underlying=underlying))
+
+        try:
+            lot_open_qty = int(lot_pos.get("open_qty") or lot_pos.get("qty") or 0)
+        except (TypeError, ValueError):
+            lot_open_qty = 0
+
+        if lot_open_qty < qty:
+            return redirect(url_for("covered_call", underlying=underlying))
+
+        # 1) Dá baixa nas ações (fecha lote inteiro ou registra parcial).
+        if lot_open_qty == qty:
+            close_position(
+                position_id=int(lot_id),
+                exit_date=date,
+                exit_price=float(strike),
+                exit_reason="Exercício",
+            )
+        else:
+            existing_partial_qty = int(lot_pos.get("partial_qty") or 0)
+            existing_partial_price = lot_pos.get("partial_price")
+            total_qty = int(lot_pos.get("qty") or 0)
+            new_partial_qty = existing_partial_qty + qty
+            if new_partial_qty > total_qty:
+                return redirect(url_for("covered_call", underlying=underlying))
+
+            new_partial_price = float(strike)
+            if existing_partial_qty > 0 and existing_partial_price is not None:
+                try:
+                    new_partial_price = (
+                        (float(existing_partial_price) * existing_partial_qty) + (float(strike) * qty)
+                    ) / new_partial_qty
+                except Exception:
+                    new_partial_price = float(strike)
+
+            update_position(
+                position_id=int(lot_id),
+                partial_qty=new_partial_qty,
+                partial_price=float(new_partial_price),
+                partial_date=date,
+                exit_reason="Exercício",
+            )
+            if new_partial_qty == total_qty:
+                close_position(
+                    position_id=int(lot_id),
+                    exit_date=date,
+                    exit_price=float(strike),
+                    exit_reason="Exercício",
+                )
+
+        # 2) Fecha a CALL (exercida).
+        close_position(
+            position_id=position_id,
+            exit_date=date,
+            exit_price=0.0,
+            exit_reason="Exercício",
+        )
+
+        # 3) Credita o caixa liberado (Strike * Qty) no modo (real/simulado) correspondente.
+        proceeds = float(strike) * qty
+        finance.add_transaction(
+            date=date,
+            type=finance.TransactionType.SELL,
+            amount=proceeds,
+            description=f"Venda (CALL exercida) {call_pos.get('ticker')} @ {float(strike):.2f}",
+            position_id=position_id,
+            is_simulated=is_simulated,
+        )
+
+        return redirect(url_for("covered_call", underlying=underlying))
 
     @app.post("/finance/update/<int:tx_id>")
     def finance_update(tx_id: int):
