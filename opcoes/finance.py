@@ -14,6 +14,7 @@ class TransactionType(str, Enum):
     ASSIGNMENT = "ASSIGN"    # Custo de exercício (compra da ação)
     BUY = "BUY"              # Compra direta de ativo
     SELL = "SELL"            # Venda direta de ativo
+    DARF = "DARF"            # Provisão/pagamento de IR (DARF)
     DIVIDEND = "DIVIDEND"    # Dividendos recebidos
 
 

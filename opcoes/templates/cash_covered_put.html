@@ -208,6 +208,7 @@
                           <option value="ASSIGN" {% if tx.type.value == 'ASSIGN' %}selected{% endif %}>Exercício</option>
                           <option value="BUY" {% if tx.type.value == 'BUY' %}selected{% endif %}>Compra</option>
                           <option value="SELL" {% if tx.type.value == 'SELL' %}selected{% endif %}>Venda</option>
+                          <option value="DARF" {% if tx.type.value == 'DARF' %}selected{% endif %}>DARF (IR)</option>
                           <option value="DIVIDEND" {% if tx.type.value == 'DIVIDEND' %}selected{% endif %}>Dividendo</option>
                         </select>
                       </td>
@@ -303,19 +304,32 @@
                     {% if pos.projected_outcome is not none %}{{ "%.2f"|format(pos.projected_outcome) }}{% else %}-{% endif %}
                   </td>
                   <td class="text-end">
-                    {% if pos.id and pos.open_qty and pos.strike is not none %}
-                      <form method="post" action="/finance/assign" class="d-inline">
+                    {% if pos.id and pos.open_qty %}
+                      <form method="post" action="/finance/expire" class="d-inline">
                         <input type="hidden" name="position_id" value="{{ pos.id }}">
-                        <input type="hidden" name="qty" value="{{ pos.open_qty }}">
-                        <input type="hidden" name="strike" value="{{ '%.4f'|format(pos.strike) }}">
+                        <input type="hidden" name="date" value="{{ pos.vencimento or '' }}">
                         <button
                           type="submit"
-                          class="btn btn-outline-primary btn-sm"
-                          onclick="return confirm('Confirmar exercício da put {{ pos.ticker }}?');"
+                          class="btn btn-outline-secondary btn-sm"
+                          onclick="return confirm('Confirmar expiração da put {{ pos.ticker }}? (fecha a 0 e libera colateral)');"
                         >
-                          Exercido
+                          Expirou
                         </button>
                       </form>
+                      {% if pos.strike is not none %}
+                        <form method="post" action="/finance/assign" class="d-inline">
+                          <input type="hidden" name="position_id" value="{{ pos.id }}">
+                          <input type="hidden" name="qty" value="{{ pos.open_qty }}">
+                          <input type="hidden" name="strike" value="{{ '%.4f'|format(pos.strike) }}">
+                          <button
+                            type="submit"
+                            class="btn btn-outline-primary btn-sm"
+                            onclick="return confirm('Confirmar exercício da put {{ pos.ticker }}?');"
+                          >
+                            Exercido
+                          </button>
+                        </form>
+                      {% endif %}
                     {% else %}
                       -
                     {% endif %}
@@ -385,19 +399,32 @@
                     {% if pos.projected_outcome is not none %}{{ "%.2f"|format(pos.projected_outcome) }}{% else %}-{% endif %}
                   </td>
                   <td class="text-end">
-                    {% if pos.id and pos.open_qty and pos.strike is not none %}
-                      <form method="post" action="/finance/assign" class="d-inline">
+                    {% if pos.id and pos.open_qty %}
+                      <form method="post" action="/finance/expire" class="d-inline">
                         <input type="hidden" name="position_id" value="{{ pos.id }}">
-                        <input type="hidden" name="qty" value="{{ pos.open_qty }}">
-                        <input type="hidden" name="strike" value="{{ '%.4f'|format(pos.strike) }}">
+                        <input type="hidden" name="date" value="{{ pos.vencimento or '' }}">
                         <button
                           type="submit"
-                          class="btn btn-outline-primary btn-sm"
-                          onclick="return confirm('Confirmar exercício da put {{ pos.ticker }} (simulado)?');"
+                          class="btn btn-outline-secondary btn-sm"
+                          onclick="return confirm('Confirmar expiração da put {{ pos.ticker }} (simulado)? (fecha a 0 e libera colateral)');"
                         >
-                          Exercido
+                          Expirou
                         </button>
                       </form>
+                      {% if pos.strike is not none %}
+                        <form method="post" action="/finance/assign" class="d-inline">
+                          <input type="hidden" name="position_id" value="{{ pos.id }}">
+                          <input type="hidden" name="qty" value="{{ pos.open_qty }}">
+                          <input type="hidden" name="strike" value="{{ '%.4f'|format(pos.strike) }}">
+                          <button
+                            type="submit"
+                            class="btn btn-outline-primary btn-sm"
+                            onclick="return confirm('Confirmar exercício da put {{ pos.ticker }} (simulado)?');"
+                          >
+                            Exercido
+                          </button>
+                        </form>
+                      {% endif %}
                     {% else %}
                       -
                     {% endif %}

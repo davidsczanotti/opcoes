@@ -119,7 +119,7 @@ def create_app() -> Flask:
     def finance_callaway():
         form = request.form
         position_id = int(form.get("position_id"))
-        date = form.get("date") or datetime.date.today().isoformat()
+        date = _parse_form_date(form.get("date")) or datetime.date.today().isoformat()
 
         call_pos = get_position(position_id)
         if not call_pos:
@@ -231,6 +231,48 @@ def create_app() -> Flask:
         )
 
         return redirect(url_for("covered_call", underlying=underlying))
+
+    @app.post("/finance/expire")
+    def finance_expire():
+        form = request.form
+        try:
+            position_id = int(form.get("position_id"))
+        except (TypeError, ValueError):
+            return redirect(url_for("positions"))
+
+        date = _parse_form_date(form.get("date")) or datetime.date.today().isoformat()
+
+        pos = get_position(position_id)
+        if not pos:
+            return redirect(url_for("positions"))
+
+        ticker = pos.get("ticker")
+        underlying = (pos.get("underlying") or "").strip().upper()
+        opt_type = infer_option_type(ticker)
+
+        if not underlying or (ticker and (str(ticker).strip().upper() == underlying)):
+            return redirect(url_for("positions"))
+
+        if (pos.get("status") or "").strip().lower() != "open":
+            if opt_type == "PUT":
+                return redirect(url_for("cash_covered_put", underlying=underlying) if underlying else url_for("cash_covered_put"))
+            if opt_type == "CALL":
+                return redirect(url_for("covered_call", underlying=underlying) if underlying else url_for("covered_call"))
+            return redirect(url_for("positions"))
+
+        if opt_type not in {"PUT", "CALL"}:
+            return redirect(url_for("positions"))
+
+        close_position(
+            position_id=position_id,
+            exit_date=date,
+            exit_price=0.0,
+            exit_reason="Expiração",
+        )
+
+        if opt_type == "PUT":
+            return redirect(url_for("cash_covered_put", underlying=underlying) if underlying else url_for("cash_covered_put"))
+        return redirect(url_for("covered_call", underlying=underlying) if underlying else url_for("covered_call"))
 
     @app.post("/finance/update/<int:tx_id>")
     def finance_update(tx_id: int):
@@ -377,21 +419,13 @@ def create_app() -> Flask:
             strategy_tag=form.get("strategy_tag") or None,
         )
 
-        # Se for venda de opção (PUT ou CALL) e não simulado, registra o prêmio no caixa
-        if entry_price > 0:
-            # Simplificação: se tem "trade_type" swing/daytrade, assumimos venda? 
-            # Melhor checar se é option. infer_option_type não está importado aqui, mas podemos assumir pelo ticker.
-            # Se for short position (venda), entra dinheiro.
-            # O form add_position atual assume "Compra"? Não, o cli.py diz "add_position" e "entry_price".
-            # Normalmente "add position" é "abrir". 
-            # Se for "Venda Coberta" ou "Venda de Put", abrimos VENDIDO.
-            # O sistema atual de portfolio não distingue explicitamente Long/Short no "add", apenas qtd.
-            # Vamos assumir que se o usuário está na tela de "Cash Covered Put", ele está vendendo.
-            # Mas o endpoint /positions/add é genérico.
-            # Vamos adicionar um checkbox ou hidden field "credit_premium" no form da view, ou inferir.
-            # Por enquanto, vamos deixar manual ou fazer uma verificação simples:
-            # Se o usuário marcar "Registrar Prêmio no Caixa" (novo campo no form).
-            if form.get("record_premium") == "1":
+        # Registro opcional: prêmio no caixa (venda) + provisão DARF (saldo limpo).
+        if entry_price > 0 and qty > 0 and form.get("record_premium") == "1":
+            t = (ticker or "").strip().upper()
+            u = (underlying or "").strip().upper()
+            is_option = bool(u) and t and t != u
+
+            if is_option:
                 total_premium = (entry_price * qty) - fees
                 finance.add_transaction(
                     date=form.get("trade_date", ""),
@@ -401,6 +435,21 @@ def create_app() -> Flask:
                     position_id=pos_id,
                     is_simulated=is_simulated,
                 )
+
+                if form.get("reserve_darf") == "1":
+                    trade_type = (form.get("trade_type") or "swing").strip().lower()
+                    aliquota_opts = 0.20 if "day" in trade_type else 0.15
+                    base_ir = max(0.0, float(total_premium))
+                    darf = base_ir * aliquota_opts
+                    if darf > 0:
+                        finance.add_transaction(
+                            date=form.get("trade_date", ""),
+                            type=finance.TransactionType.DARF,
+                            amount=-darf,
+                            description=f"Provisão DARF {ticker} ({int(aliquota_opts*100)}%)",
+                            position_id=pos_id,
+                            is_simulated=is_simulated,
+                        )
 
         return redirect(_safe_next_url(form.get("next")) or url_for("positions"))
 
@@ -454,6 +503,23 @@ def create_app() -> Flask:
             return float(text)
         except ValueError:
             return 0.0
+
+    def _parse_form_date(value: str | None) -> str | None:
+        if not value:
+            return None
+        text = value.strip()
+        if not text:
+            return None
+        # Aceita ISO (YYYY-MM-DD)
+        try:
+            return datetime.date.fromisoformat(text).isoformat()
+        except ValueError:
+            pass
+        # Aceita dd/mm/YYYY (vencimento da B3 no snapshot)
+        try:
+            return datetime.datetime.strptime(text, "%d/%m/%Y").date().isoformat()
+        except ValueError:
+            return None
 
     def _lookup_underlying_from_snapshot(ticker: str) -> str | None:
         if not ticker:
