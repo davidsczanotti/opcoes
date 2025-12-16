@@ -131,3 +131,7 @@ def test_record_premium_with_darf_provision(monkeypatch, tmp_path) -> None:
         assert bool(prem[0].is_simulated) is sim
         assert bool(darf[0].is_simulated) is sim
 
+        monthly_net = finance.get_monthly_premiums(limit_months=12, is_simulated=sim, include_darf=True)
+        assert monthly_net
+        assert monthly_net[-1]["month"] == "2025-01"
+        assert abs(float(monthly_net[-1]["total"]) - (gross * (1 - 0.15) + gross * (1 - 0.20))) < 1e-6

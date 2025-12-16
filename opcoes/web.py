@@ -19,7 +19,7 @@ from .settings import (
     update_strategy_settings,
 )
 from .strategies import get_cash_covered_put_context, get_covered_call_context, get_ranking_context
-from . import finance
+from . import finance, darf
 
 
 def create_app() -> Flask:
@@ -39,6 +39,136 @@ def create_app() -> Flask:
     def cash_covered_put() -> str:
         ctx = get_cash_covered_put_context(request.args)
         return render_template("cash_covered_put.html", **ctx)
+
+    @app.route("/darf")
+    def darf_view() -> str:
+        mode = (request.args.get("mode") or "real").strip().lower()
+        is_simulated = mode == "simulated"
+        selected_period = (request.args.get("period") or "").strip()
+
+        provisions = darf.get_monthly_darf_provisions(is_simulated=is_simulated, limit=36)
+        records = darf.list_months(is_simulated=is_simulated, limit=36)
+        record_by_period = {r.period: r for r in records}
+
+        periods = sorted(set(provisions.keys()) | set(record_by_period.keys()), reverse=True)
+        if not selected_period:
+            if periods:
+                selected_period = periods[0]
+            else:
+                selected_period = datetime.date.today().strftime("%Y-%m")
+
+        summaries = []
+        for p in periods:
+            prov = float(provisions.get(p, 0.0) or 0.0)
+            rec = record_by_period.get(p)
+            try:
+                due_date = rec.due_date if rec else darf.last_business_day_next_month(p)
+            except Exception:
+                due_date = "-"
+
+            generated = rec.amount if rec else None
+            paid_date = rec.paid_date if rec else None
+            paid_amount = rec.paid_amount if rec else None
+
+            status = "Sem movimento"
+            if prov > 0 and not rec:
+                status = "Pendente"
+            if rec and not rec.paid_date:
+                status = "Gerado"
+            if rec and rec.paid_date:
+                status = "Pago"
+
+            diff = None
+            if prov > 0 and rec:
+                diff = prov - float(rec.amount or 0.0)
+
+            summaries.append(
+                {
+                    "period": p,
+                    "provisioned": prov,
+                    "generated": generated,
+                    "due_date": due_date,
+                    "paid_date": paid_date,
+                    "paid_amount": paid_amount,
+                    "status": status,
+                    "diff": diff,
+                }
+            )
+
+        selected_record = None
+        try:
+            selected_record = darf.get_month(period=selected_period, is_simulated=is_simulated)
+        except Exception:
+            selected_record = None
+
+        provision_entries = []
+        try:
+            provision_entries = darf.list_provision_entries(period=selected_period, is_simulated=is_simulated)
+        except Exception:
+            provision_entries = []
+
+        return render_template(
+            "darf.html",
+            mode=mode,
+            is_simulated=is_simulated,
+            selected_period=selected_period,
+            periods=summaries,
+            provision_entries=provision_entries,
+            selected_record=selected_record,
+        )
+
+    @app.post("/darf/generate")
+    def darf_generate():
+        form = request.form
+        period = (form.get("period") or "").strip()
+        is_simulated = form.get("is_simulated") == "1"
+        mode = "simulated" if is_simulated else "real"
+
+        try:
+            entries = darf.list_provision_entries(period=period, is_simulated=is_simulated)
+            provisioned = max(0.0, -sum(float(e.get("amount") or 0.0) for e in entries))
+            due_date = darf.last_business_day_next_month(period)
+        except Exception:
+            return redirect(url_for("darf_view", mode=mode))
+
+        if provisioned > 0:
+            darf.upsert_month(
+                period=period,
+                due_date=due_date,
+                amount=provisioned,
+                is_simulated=is_simulated,
+            )
+
+        return redirect(url_for("darf_view", mode=mode, period=period))
+
+    @app.post("/darf/pay")
+    def darf_pay():
+        form = request.form
+        period = (form.get("period") or "").strip()
+        is_simulated = form.get("is_simulated") == "1"
+        mode = "simulated" if is_simulated else "real"
+        paid_date = _parse_form_date(form.get("paid_date")) or datetime.date.today().isoformat()
+        paid_amount = _parse_form_float(form.get("paid_amount")) if form.get("paid_amount") else None
+
+        try:
+            rec = darf.get_month(period=period, is_simulated=is_simulated)
+            if not rec:
+                entries = darf.list_provision_entries(period=period, is_simulated=is_simulated)
+                provisioned = max(0.0, -sum(float(e.get("amount") or 0.0) for e in entries))
+                if provisioned <= 0:
+                    return redirect(url_for("darf_view", mode=mode, period=period))
+                due_date = darf.last_business_day_next_month(period)
+                darf.upsert_month(period=period, due_date=due_date, amount=provisioned, is_simulated=is_simulated)
+            darf.mark_paid(
+                period=period,
+                paid_date=paid_date,
+                paid_amount=paid_amount,
+                is_simulated=is_simulated,
+            )
+        except Exception:
+            return redirect(url_for("darf_view", mode=mode, period=period))
+
+        return redirect(url_for("darf_view", mode=mode, period=period))
 
     @app.post("/finance/add")
     def finance_add():

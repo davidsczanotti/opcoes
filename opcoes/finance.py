@@ -105,20 +105,41 @@ def get_balance(mode: str = "all") -> float:
         conn.close()
 
 
-def get_monthly_premiums(limit_months: int = 12) -> List[dict]:
-    """Retorna soma de prêmios agrupados por mês (YYYY-MM)."""
+def get_monthly_premiums(
+    limit_months: int = 12,
+    *,
+    is_simulated: Optional[bool] = False,
+    include_darf: bool = False,
+) -> List[dict]:
+    """Retorna soma de prêmios agrupados por mês (YYYY-MM).
+
+    - is_simulated: False (padrão) -> somente real; True -> somente simulado; None -> ambos.
+    - include_darf: soma também DARF (negativo) para exibir líquido (PREMIUM - DARF).
+    """
     conn = _get_conn()
     try:
-        # Filtra apenas PREMIUM (vendas de opções)
-        query = """
+        where: list[str] = []
+        params: list[object] = []
+        if include_darf:
+            # DARF de provisão é lançado com position_id; evita misturar com DARF "pago" (manual).
+            where.append("(type = ? OR (type = ? AND position_id IS NOT NULL))")
+            params.extend([TransactionType.PREMIUM.value, TransactionType.DARF.value])
+        else:
+            where.append("type = ?")
+            params.append(TransactionType.PREMIUM.value)
+        if is_simulated is not None:
+            where.append("COALESCE(is_simulated, 0) = ?")
+            params.append(1 if is_simulated else 0)
+
+        query = f"""
             SELECT strftime('%Y-%m', date) as month, SUM(amount) as total
             FROM ledger
-            WHERE type = ? AND COALESCE(is_simulated, 0) = 0
+            WHERE {' AND '.join(where)}
             GROUP BY month
             ORDER BY month DESC
             LIMIT ?
         """
-        rows = conn.execute(query, (TransactionType.PREMIUM.value, limit_months)).fetchall()
+        rows = conn.execute(query, (*params, limit_months)).fetchall()
         # Inverte para ordem cronológica (gráfico)
         results = [{"month": r["month"], "total": r["total"]} for r in rows]
         return results[::-1] 

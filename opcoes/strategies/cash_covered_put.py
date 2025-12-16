@@ -264,7 +264,13 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
                         # Parse YYYY-MM-DD
                         dt = datetime.date.fromisoformat(t_date)
                         m_key = dt.strftime("%Y-%m")
-                        val = (entry * qty) - fees
+                        # Líquido aproximado: prêmio - taxas - provisão DARF (15% swing / 20% day trade).
+                        trade_type = (pos.get("trade_type") or "swing").strip().lower()
+                        aliquota_opts = 0.20 if "day" in trade_type else 0.15
+                        premium_bruto = (entry * qty)
+                        base_premio = max(0.0, float(premium_bruto - fees))
+                        ir_premio = base_premio * aliquota_opts
+                        val = float(premium_bruto - fees - ir_premio)
                         sim_premiums_agg[m_key] = sim_premiums_agg.get(m_key, 0.0) + val
                     except ValueError:
                         pass
@@ -272,9 +278,9 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
                 puts_real.append(pos)
     
     # Formata lista de prêmios simulados (ordenada desc)
-    simulated_monthly_premiums = []
+    simulated_monthly_premiums_fallback = []
     for m in sorted(sim_premiums_agg.keys(), reverse=True):
-        simulated_monthly_premiums.append({"month": m, "total": sim_premiums_agg[m]})
+        simulated_monthly_premiums_fallback.append({"month": m, "total": sim_premiums_agg[m]})
 
     rows = fetch_latest_underlying_options(underlying=underlying)
     suggestions = _build_put_suggestions(
@@ -314,7 +320,9 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         puts_real=puts_real,
         puts_simulated=puts_simulated,
     )
-    monthly_premiums = finance.get_monthly_premiums()
+    # Prêmios líquidos por mês (PREMIUM - DARF) via caixa (ledger).
+    monthly_premiums = finance.get_monthly_premiums(include_darf=True, is_simulated=False)
+    simulated_monthly_premiums = finance.get_monthly_premiums(include_darf=True, is_simulated=True) or simulated_monthly_premiums_fallback
     transactions = finance.get_transactions(limit=10)
 
     return {

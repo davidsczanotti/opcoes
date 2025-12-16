@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <title>Opções – DARF</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    >
+  </head>
+  <body class="bg-light">
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4 sticky-top">
+      <div class="container-fluid">
+        <a class="navbar-brand" href="/">Opções</a>
+        <div class="navbar-nav">
+          <a class="nav-link" href="/">Ranking</a>
+          <a class="nav-link" href="/positions">Posições</a>
+          <a class="nav-link" href="/covered-call">Covered Call</a>
+          <a class="nav-link" href="/cash-covered-put">Cash-Covered Put</a>
+          <a class="nav-link active" href="/darf">DARF</a>
+          <a class="nav-link" href="/settings">Configurações</a>
+        </div>
+      </div>
+    </nav>
+
+    <div class="container">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1 class="h4 mb-0">DARF ({{ 'Simulado' if is_simulated else 'Real' }})</h1>
+        <div class="btn-group btn-group-sm" role="group" aria-label="Modo">
+          <a class="btn {% if not is_simulated %}btn-primary{% else %}btn-outline-primary{% endif %}" href="/darf?mode=real">Real</a>
+          <a class="btn {% if is_simulated %}btn-warning{% else %}btn-outline-warning{% endif %}" href="/darf?mode=simulated">Simulado</a>
+        </div>
+      </div>
+
+      <p class="text-muted small mb-4">
+        Esta aba consolida a <strong>provisão de DARF</strong> (saldo “limpo”) lançada no caixa.
+        Vencimento é calculado como <strong>último dia útil do mês seguinte</strong> (sem feriados).
+      </p>
+
+      <div class="table-responsive mb-4">
+        <table class="table table-sm table-striped align-middle">
+          <thead class="table-light">
+            <tr>
+              <th>Competência</th>
+              <th class="text-end">Provisão (R$)</th>
+              <th class="text-end">DARF gerado (R$)</th>
+              <th>Vencimento</th>
+              <th>Pago em</th>
+              <th class="text-end">Pago (R$)</th>
+              <th>Status</th>
+              <th class="text-end">Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if not periods %}
+              <tr>
+                <td colspan="8" class="text-muted text-center">Sem provisões de DARF registradas.</td>
+              </tr>
+            {% else %}
+              {% for row in periods %}
+                {% set is_selected = (row.period == selected_period) %}
+                <tr class="{% if is_selected %}table-primary{% endif %}">
+                  <td>
+                    <a href="/darf?mode={{ mode }}&period={{ row.period }}" class="{% if is_selected %}text-dark fw-bold{% endif %}">
+                      {{ row.period }}
+                    </a>
+                    {% if row.diff is not none and row.diff|abs > 0.01 %}
+                      <div class="text-muted small">Diferença vs gerado: {{ "%.2f"|format(row.diff) }}</div>
+                    {% endif %}
+                  </td>
+                  <td class="text-end">{{ "%.2f"|format(row.provisioned or 0) }}</td>
+                  <td class="text-end">
+                    {% if row.generated is not none %}
+                      {{ "%.2f"|format(row.generated) }}
+                    {% else %}
+                      -
+                    {% endif %}
+                  </td>
+                  <td>{{ row.due_date or '-' }}</td>
+                  <td>{{ row.paid_date or '-' }}</td>
+                  <td class="text-end">
+                    {% if row.paid_amount is not none %}
+                      {{ "%.2f"|format(row.paid_amount) }}
+                    {% else %}
+                      -
+                    {% endif %}
+                  </td>
+                  <td>
+                    {% if row.status == 'Pago' %}
+                      <span class="badge bg-success">Pago</span>
+                    {% elif row.status == 'Gerado' %}
+                      <span class="badge bg-primary">Gerado</span>
+                    {% elif row.status == 'Pendente' %}
+                      <span class="badge bg-warning text-dark">Pendente</span>
+                    {% else %}
+                      <span class="badge bg-secondary">Sem movimento</span>
+                    {% endif %}
+                  </td>
+                  <td class="text-end">
+                    <div class="d-inline-flex gap-1">
+                      {% if row.provisioned and row.provisioned > 0 %}
+                        <form method="post" action="/darf/generate">
+                          <input type="hidden" name="period" value="{{ row.period }}">
+                          <input type="hidden" name="is_simulated" value="{{ 1 if is_simulated else 0 }}">
+                          <button type="submit" class="btn btn-outline-primary btn-sm">
+                            {% if row.generated is none %}Gerar{% else %}Atualizar{% endif %}
+                          </button>
+                        </form>
+                      {% endif %}
+
+                      {% if row.generated is not none and (not row.paid_date) %}
+                        <form method="post" action="/darf/pay">
+                          <input type="hidden" name="period" value="{{ row.period }}">
+                          <input type="hidden" name="is_simulated" value="{{ 1 if is_simulated else 0 }}">
+                          <button type="submit" class="btn btn-outline-success btn-sm">
+                            Marcar pago
+                          </button>
+                        </form>
+                      {% endif %}
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="row g-3">
+        <div class="col-lg-7">
+          <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+              <span>Lançamentos de provisão – {{ selected_period }}</span>
+              <small class="text-muted">{{ 'Simulado' if is_simulated else 'Real' }}</small>
+            </div>
+            <div class="card-body p-0">
+              <div class="table-responsive">
+                <table class="table table-sm table-striped mb-0 align-middle">
+                  <thead class="table-light">
+                    <tr>
+                      <th>ID</th>
+                      <th>Data</th>
+                      <th>Ticker</th>
+                      <th class="text-end">Valor (R$)</th>
+                      <th>Vínculo</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% if not provision_entries %}
+                      <tr>
+                        <td colspan="5" class="text-muted text-center">Sem lançamentos neste mês.</td>
+                      </tr>
+                    {% else %}
+                      {% for e in provision_entries %}
+                        <tr>
+                          <td>{{ e.id }}</td>
+                          <td>{{ e.date }}</td>
+                          <td>{{ e.position_ticker or '-' }}</td>
+                          <td class="text-end">{{ "%.2f"|format((-1 * (e.amount or 0))|float) }}</td>
+                          <td class="text-muted small">
+                            {% if e.position_id %}
+                              posição #{{ e.position_id }}
+                            {% else %}
+                              -
+                            {% endif %}
+                          </td>
+                        </tr>
+                      {% endfor %}
+                    {% endif %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-lg-5">
+          <div class="card">
+            <div class="card-header">DARF – {{ selected_period }}</div>
+            <div class="card-body">
+              {% if selected_record %}
+                <div class="mb-2">
+                  <div class="text-muted small">Vencimento</div>
+                  <div class="fw-semibold">{{ selected_record.due_date }}</div>
+                </div>
+                <div class="mb-2">
+                  <div class="text-muted small">Valor gerado (R$)</div>
+                  <div class="fw-semibold">{{ "%.2f"|format(selected_record.amount) }}</div>
+                </div>
+                <div class="mb-3">
+                  <div class="text-muted small">Status</div>
+                  {% if selected_record.paid_date %}
+                    <div class="fw-semibold text-success">Pago em {{ selected_record.paid_date }} (R$ {{ "%.2f"|format(selected_record.paid_amount or selected_record.amount) }})</div>
+                  {% else %}
+                    <div class="fw-semibold text-primary">Gerado (a pagar)</div>
+                  {% endif %}
+                </div>
+              {% else %}
+                <p class="text-muted small mb-3">Nenhum DARF gerado para este mês.</p>
+              {% endif %}
+
+              <div class="d-flex gap-2 flex-wrap">
+                <form method="post" action="/darf/generate" class="d-flex gap-2 align-items-end flex-wrap">
+                  <input type="hidden" name="period" value="{{ selected_period }}">
+                  <input type="hidden" name="is_simulated" value="{{ 1 if is_simulated else 0 }}">
+                  <button type="submit" class="btn btn-outline-primary btn-sm">Gerar/Atualizar</button>
+                </form>
+
+                <form method="post" action="/darf/pay" class="d-flex gap-2 align-items-end flex-wrap">
+                  <input type="hidden" name="period" value="{{ selected_period }}">
+                  <input type="hidden" name="is_simulated" value="{{ 1 if is_simulated else 0 }}">
+                  <div>
+                    <label class="form-label small mb-1">Pago em</label>
+                    <input type="date" name="paid_date" class="form-control form-control-sm">
+                  </div>
+                  <div>
+                    <label class="form-label small mb-1">Valor (R$)</label>
+                    <input type="number" step="0.01" name="paid_amount" class="form-control form-control-sm" placeholder="opcional">
+                  </div>
+                  <button type="submit" class="btn btn-outline-success btn-sm" {% if not selected_record or selected_record.paid_date %}disabled{% endif %}>
+                    Marcar pago
+                  </button>
+                </form>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  </body>
+</html>
+

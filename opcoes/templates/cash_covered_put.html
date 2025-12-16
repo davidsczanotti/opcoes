@@ -18,6 +18,7 @@
           <a class="nav-link" href="/positions">Posições</a>
           <a class="nav-link" href="/covered-call">Covered Call</a>
           <a class="nav-link active" href="/cash-covered-put">Cash-Covered Put</a>
+          <a class="nav-link" href="/darf">DARF</a>
           <a class="nav-link" href="/settings">Configurações</a>
         </div>
       </div>
@@ -102,14 +103,17 @@
         <!-- Prêmios Mensais (Real) -->
         <div class="col-md-3 mb-3 mb-md-0">
           <div class="card h-100">
-            <div class="card-header">Prêmios Recebidos (Real)</div>
+            <div class="card-header">Prêmios líquidos (Real)</div>
             <div class="card-body p-0">
               <ul class="list-group list-group-flush small">
                 {% if monthly_premiums %}
                   {% for m in monthly_premiums %}
                     <li class="list-group-item d-flex justify-content-between align-items-center">
                       <span>{{ m.month }}</span>
-                      <span class="fw-bold text-success">+ R$ {{ "%.2f"|format(m.total) }}</span>
+                      {% set total = m.total or 0 %}
+                      <span class="fw-bold {% if total >= 0 %}text-success{% else %}text-danger{% endif %}">
+                        {% if total >= 0 %}+{% else %}-{% endif %} R$ {{ "%.2f"|format(total|abs) }}
+                      </span>
                     </li>
                   {% endfor %}
                 {% else %}
@@ -123,14 +127,17 @@
         <!-- Prêmios Mensais (Simulado) -->
         <div class="col-md-3 mb-3 mb-md-0">
           <div class="card h-100 border-warning">
-            <div class="card-header bg-warning-subtle text-dark">Prêmios (Simulado)</div>
+            <div class="card-header bg-warning-subtle text-dark">Prêmios líquidos (Simulado)</div>
             <div class="card-body p-0">
               <ul class="list-group list-group-flush small">
                 {% if simulated_monthly_premiums %}
                   {% for m in simulated_monthly_premiums %}
                     <li class="list-group-item d-flex justify-content-between align-items-center">
                       <span>{{ m.month }}</span>
-                      <span class="fw-bold text-success">+ R$ {{ "%.2f"|format(m.total) }}</span>
+                      {% set total = m.total or 0 %}
+                      <span class="fw-bold {% if total >= 0 %}text-success{% else %}text-danger{% endif %}">
+                        {% if total >= 0 %}+{% else %}-{% endif %} R$ {{ "%.2f"|format(total|abs) }}
+                      </span>
                     </li>
                   {% endfor %}
                 {% else %}
