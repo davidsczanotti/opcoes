@@ -5,9 +5,10 @@ import math
 import sqlite3
 import statistics
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
-from .scraper.storage import _ensure_parent
+from . import quant
+from .scraper.storage import CSV_FIELDS, _ensure_parent
 from .config import get_db_path
 from .portfolio import list_positions
 
@@ -44,16 +45,28 @@ def generate_report(
     # Busca mais linhas que o limite final para não ficar sem opções negociáveis
     fetch_limit = max(limit * 5, limit)
     opportunities = _fetch_opportunities(conn, snapshot_date, min_score, fetch_limit)
-    hv_map = _compute_hv_map(conn, snapshot_date, [o.get("underlying", "") for o in opportunities], hv_days)
+    hv_windows = _normalize_hv_windows([21, 63, 126, 252, hv_days])
+    hv_maps = _compute_hv_maps(conn, snapshot_date, [o.get("underlying", "") for o in opportunities], hv_windows)
     for opp in opportunities:
         underlying = (opp.get("underlying") or "").strip().upper()
-        hv = hv_map.get(underlying)
-        opp["hv_21d"] = hv
+        hv_by_window = {w: hv_maps.get(w, {}).get(underlying) for w in hv_windows}
+        opp["hv_21d"] = hv_by_window.get(21)
+        opp["hv_63d"] = hv_by_window.get(63)
+        opp["hv_126d"] = hv_by_window.get(126)
+        opp["hv_252d"] = hv_by_window.get(252)
+
+        hv_ref_window, hv_ref = _pick_hv_reference_window(opp.get("dias_uteis"), hv_by_window)
+        opp["hv_ref_window"] = hv_ref_window
+        opp["hv_ref"] = hv_ref
+
         iv = opp.get("vol_impl_perc")
-        if hv is not None and iv is not None:
-            opp["iv_hv_spread"] = iv - hv
+        if hv_ref is not None and iv is not None:
+            opp["iv_hv_spread"] = iv - hv_ref
         else:
             opp["iv_hv_spread"] = None
+
+        if opp.get("prob_be_pct") is None:
+            opp["prob_be_pct"] = _compute_prob_above_breakeven_pct(opp)
         ask = opp.get("best_ask")
         theo = opp.get("preco_teorico")
         if ask is not None and theo is not None and theo > 0:
@@ -75,16 +88,24 @@ def generate_report(
     tradeable_opps: List[Dict[str, object]] = []
     theoretical_opps: List[Dict[str, object]] = []
     for opp in opportunities:
-        has_ask = opp.get("best_ask") is not None
+        ask = opp.get("best_ask")
+        bid = opp.get("best_bid")
+        has_ask = ask is not None and ask > 0
+        has_bid = bid is not None and bid > 0
         has_theoretical = opp.get("preco_teorico") is not None
-        has_reference = opp.get("best_bid") is not None or opp.get("ultimo") is not None
+        has_reference = opp.get("ultimo") is not None or has_ask or has_bid
 
-        if has_ask:
+        # Só considera "Top" quando conseguimos calcular spread (bid+ask).
+        # Sem isso, cai em watchlist/teóricas por risco de execução.
+        if has_ask and has_bid:
+            if opp.get("spread_pct") is None:
+                mid = (ask + bid) / 2.0
+                opp["spread_pct"] = (ask - bid) / mid * 100.0 if mid > 0 else None
             tradeable_opps.append(opp)
         elif has_theoretical:
             theoretical_opps.append(opp)
         elif has_reference:
-            tradeable_opps.append(opp)
+            theoretical_opps.append(opp)
 
     # Para oportunidades apenas teóricas (sem ask visível), a distorção de preço
     # deve refletir o desvio do último negócio em relação ao preço justo,
@@ -162,7 +183,33 @@ def _connect() -> sqlite3.Connection:
     _ensure_parent(db_path)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+    _ensure_snapshot_columns(conn)
     return conn
+
+
+def _ensure_snapshot_columns(conn: sqlite3.Connection) -> None:
+    """Garante compatibilidade do schema de option_snapshots com o CSV_FIELDS atual."""
+
+    try:
+        exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='option_snapshots' LIMIT 1"
+        ).fetchone()
+    except Exception:
+        return
+    if not exists:
+        return
+
+    existing = {
+        row[1]
+        for row in conn.execute('PRAGMA table_info("option_snapshots")').fetchall()
+        if row and len(row) > 1
+    }
+    missing = [col for col in CSV_FIELDS if col not in existing]
+    if not missing:
+        return
+    for col in missing:
+        conn.execute(f'ALTER TABLE "option_snapshots" ADD COLUMN "{col}" TEXT')
+    conn.commit()
 
 
 def _latest_snapshot_date(conn: sqlite3.Connection) -> Optional[str]:
@@ -214,7 +261,8 @@ def _fetch_opportunities(
             "illiquidez_flag",
             "Status_Remoto",
             "prob_itm_pct",
-            "prob_itm_delta_pct"
+            "prob_itm_delta_pct",
+            "prob_be_pct"
         FROM option_snapshots
         WHERE snapshot_date = ?
           AND CAST(REPLACE("score_total", ',', '.') AS REAL) >= ?
@@ -270,6 +318,7 @@ def _row_to_dict(row: sqlite3.Row) -> Dict[str, object]:
         "Status_Remoto": (row["Status_Remoto"] or "").strip(),
         "prob_itm_pct": _parse_decimal(row["prob_itm_pct"]),
         "prob_itm_delta_pct": _parse_decimal(row["prob_itm_delta_pct"]),
+        "prob_be_pct": _parse_decimal(row["prob_be_pct"]),
     }
 
 
@@ -452,6 +501,197 @@ def _compute_hv_map(
         except statistics.StatisticsError:
             hv_map[sym] = None
     return hv_map
+
+
+def _normalize_hv_windows(values: Iterable[int]) -> List[int]:
+    windows: List[int] = []
+    for v in values:
+        try:
+            iv = int(v)
+        except (TypeError, ValueError):
+            continue
+        if iv > 0:
+            windows.append(iv)
+    return sorted(set(windows))
+
+
+def _compute_hv_maps(
+    conn: sqlite3.Connection,
+    snapshot_date: str,
+    underlyings: Sequence[str],
+    windows: Sequence[int],
+) -> Dict[int, Dict[str, Optional[float]]]:
+    """Calcula HV em múltiplas janelas usando os últimos snapshots por ativo.
+
+    `windows` é em dias úteis aproximados (21, 63, 126, 252). A base de dados
+    é o histórico de `underlying_snapshots` do próprio scraper.
+    """
+
+    hv_windows = _normalize_hv_windows(windows)
+    if not hv_windows:
+        return {}
+
+    unique = sorted({(u or "").strip().upper() for u in underlyings if (u or "").strip()})
+    if not unique:
+        return {w: {} for w in hv_windows}
+
+    max_window = max(hv_windows)
+    max_prices = max_window + 1  # N dias -> N retornos ~ N+1 preços
+
+    placeholders = ",".join(["?"] * len(unique))
+    query = f"""
+        WITH ranked AS (
+            SELECT
+                underlying,
+                snapshot_date,
+                price,
+                ROW_NUMBER() OVER (PARTITION BY underlying ORDER BY snapshot_date DESC) AS rn
+            FROM underlying_snapshots
+            WHERE underlying IN ({placeholders})
+              AND snapshot_date <= ?
+              AND price IS NOT NULL
+        )
+        SELECT underlying, snapshot_date, price
+        FROM ranked
+        WHERE rn <= ?
+        ORDER BY underlying, snapshot_date
+    """
+    rows = conn.execute(query, (*unique, snapshot_date, max_prices)).fetchall()
+
+    grouped: Dict[str, List[float]] = {}
+    for row in rows:
+        sym = (row["underlying"] or "").strip().upper()
+        if not sym:
+            continue
+        try:
+            price_val = float(row["price"])
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(price_val) or price_val <= 0:
+            continue
+        grouped.setdefault(sym, []).append(price_val)
+
+    hv_maps: Dict[int, Dict[str, Optional[float]]] = {w: {} for w in hv_windows}
+
+    for sym, prices in grouped.items():
+        if len(prices) < 3:
+            for w in hv_windows:
+                hv_maps[w][sym] = None
+            continue
+
+        for w in hv_windows:
+            sample = prices[-(w + 1) :] if len(prices) >= (w + 1) else prices
+            min_obs = max(5, w // 2)
+            if len(sample) < min_obs:
+                hv_maps[w][sym] = None
+                continue
+            log_returns: List[float] = []
+            for prev, curr in zip(sample, sample[1:]):
+                if prev <= 0 or curr <= 0:
+                    continue
+                try:
+                    log_returns.append(math.log(curr / prev))
+                except ValueError:
+                    continue
+            if len(log_returns) < 2:
+                hv_maps[w][sym] = None
+                continue
+            try:
+                std_dev = statistics.stdev(log_returns)
+            except statistics.StatisticsError:
+                hv_maps[w][sym] = None
+                continue
+            hv_maps[w][sym] = std_dev * math.sqrt(252) * 100.0
+
+    return hv_maps
+
+
+def _pick_hv_reference_window(
+    dias_uteis: Optional[int],
+    hv_by_window: Dict[int, Optional[float]],
+) -> Tuple[Optional[int], Optional[float]]:
+    """Escolhe qual HV usar para comparar com IV, tentando aproximar o vencimento."""
+
+    if not hv_by_window:
+        return None, None
+
+    windows = sorted(hv_by_window.keys())
+    if not windows:
+        return None, None
+
+    # Se não sabemos o prazo, tenta HV 21d e faz fallback para o primeiro disponível.
+    if dias_uteis is None:
+        preferred = [21] + windows
+        for w in preferred:
+            hv = hv_by_window.get(w)
+            if hv is not None:
+                return w, hv
+        return None, None
+
+    try:
+        dte = int(dias_uteis)
+    except (TypeError, ValueError):
+        dte = None
+    if dte is None:
+        for w in windows:
+            hv = hv_by_window.get(w)
+            if hv is not None:
+                return w, hv
+        return None, None
+
+    candidates = sorted(windows, key=lambda w: abs(w - dte))
+    for w in candidates:
+        hv = hv_by_window.get(w)
+        if hv is not None:
+            return w, hv
+    return None, None
+
+
+def _compute_prob_above_breakeven_pct(opp: Dict[str, object]) -> Optional[float]:
+    """Proxy (pela IV) da probabilidade de expirar acima do breakeven (para CALLs)."""
+
+    opt_type = (opp.get("option_type") or "").strip().upper()
+    if opt_type and opt_type != "CALL":
+        return None
+
+    spot = opp.get("underlying_price")
+    vol = opp.get("vol_impl_perc")
+    days = opp.get("dias_uteis")
+    if spot is None or vol is None or days is None:
+        return None
+    try:
+        spot_val = float(spot)
+        vol_val = float(vol)
+        days_val = float(days)
+    except (TypeError, ValueError):
+        return None
+    if spot_val <= 0 or vol_val <= 0 or days_val <= 0:
+        return None
+
+    be_dist = opp.get("breakeven_dist_pct")
+    pct_move: Optional[float] = None
+    if be_dist is not None:
+        try:
+            pct_move = float(be_dist)
+        except (TypeError, ValueError):
+            pct_move = None
+    if pct_move is None:
+        be_price = opp.get("breakeven_price")
+        if be_price is not None:
+            try:
+                be_price_val = float(be_price)
+            except (TypeError, ValueError):
+                be_price_val = None
+            if be_price_val is not None and be_price_val > 0:
+                pct_move = (be_price_val - spot_val) / spot_val * 100.0
+
+    if pct_move is None or pct_move <= 0:
+        return None
+
+    prob = quant.calculate_probability_move(spot_val, pct_move, vol_val, days_val)
+    if prob is None:
+        return None
+    return prob * 100.0
 
 
 def _long_call_vol_factor(iv_rank: Optional[float], iv_hv_spread: Optional[float]) -> float:

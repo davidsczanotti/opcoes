@@ -463,11 +463,18 @@ def _print_report(data) -> None:
     else:
         header = (
             f"{'Ticker':<10} {'Und':<6} {'Score':>5} {'Último':>9} {'Ask':>9} "
-            f"{'Spr%':>6} {'Illq':>5} {'Justo':>9} {'Dist%':>7} {'%2x':>8} {'Custo%':>8} {'Ext%':>6} {'BE':>8} {'BE%':>7} {'IV%':>6} {'IVr':>5} {'HV':>6} {'IV-HV':>7} {'IVs':>4} {'EM2x':>5} {'Fluxo':>8}"
+            f"{'Spr%':>6} {'Illq':>5} {'Justo':>9} {'Dist%':>7} {'%2x':>8} {'Custo%':>8} {'ExtR$':>7} {'Ext%':>6} {'BE':>8} {'BE%':>7} {'Pbe%':>6} {'IV%':>6} {'IVr':>5} {'HVw':>4} {'HVref':>6} {'IV-HV':>7} {'IVs':>4} {'EM2x':>5} {'Fluxo':>8}"
         )
         print(header)
         print("-" * len(header))
         for opp in data.opportunities:
+            hv_window = opp.get("hv_ref_window")
+            hv_window_str = "-"
+            if hv_window is not None:
+                try:
+                    hv_window_str = str(int(hv_window))
+                except (TypeError, ValueError):
+                    hv_window_str = "-"
             print(
                 f"{opp['ticker']:<10} {opp['underlying']:<6} "
                 f"{_format_number(opp.get('score_total'), digits=2):>5} "
@@ -479,12 +486,15 @@ def _print_report(data) -> None:
                 f"{_format_number(opp.get('distorcao_preco_pct'), digits=1):>7} "
                 f"{_format_number(opp.get('%_Alta_p_2x')):>8} "
                 f"{_format_number(opp.get('custo_pct')):>8} "
+                f"{_format_currency(opp.get('extrinsic_value')):>7} "
                 f"{_format_number(opp.get('extrinsic_pct_spot')):>6} "
                 f"{_format_currency(opp.get('breakeven_price')):>8} "
                 f"{_format_number(opp.get('breakeven_dist_pct')):>7} "
+                f"{_format_number(opp.get('prob_be_pct'), digits=1):>6} "
                 f"{_format_number(opp.get('vol_impl_perc')):>6} "
                 f"{_format_number(opp.get('iv_rank_180d'), digits=1):>5} "
-                f"{_format_number(opp.get('hv_21d')):>6} "
+                f"{hv_window_str:>4} "
+                f"{_format_number(opp.get('hv_ref')):>6} "
                 f"{_format_number(opp.get('iv_hv_spread')):>7} "
                 f"{(opp.get('iv_score') if opp.get('iv_score') is not None else '-'):>4} "
                 f"{(opp.get('em2x_score') if opp.get('em2x_score') is not None else '-'):>5} "

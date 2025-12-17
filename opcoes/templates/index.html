@@ -74,14 +74,14 @@
 
       <h2 class="h5 mt-4">Top oportunidades</h2>
       <p class="text-muted small">
-        IV impl = última do book; IV Rank = faixa 180d; HV = vol. hist 21d a partir dos snapshots diários.
-        Se HV ou IV Rank aparecerem vazios, é porque ainda não há histórico suficiente na janela.
+        IV impl = última do book; IV Rank = faixa 180d; HV (21/63/126/252) = vol. hist. a partir dos snapshots diários.
+        IV-HV usa a HV com janela mais próxima do vencimento (quando disponível). Se HV/IV Rank aparecerem vazios, é porque ainda não há histórico suficiente.
       </p>
       {% if not data.opportunities %}
         <p>Nenhuma opção dentro do filtro de score.</p>
       {% else %}
         <p class="text-muted small">
-          Opções com <strong>ask</strong> visível entram no Top; sem ask, vão para “Oportunidades teóricas” (liquidez oculta), usando preço teórico/último como referência.
+          Opções com <strong>bid+ask</strong> (spread calculável) entram no Top; sem book/spread, vão para a Watchlist, usando preço teórico/último apenas como referência.
         </p>
         <div class="table-responsive">
           <table class="table table-sm table-striped align-middle">
@@ -101,15 +101,20 @@
                 <th class="text-end">Dist. preço%</th>
                 <th class="text-end">% p/ 2x</th>
                 <th class="text-end">Custo %</th>
+                <th class="text-end">Extr R$</th>
                 <th class="text-end">Extr.% Spot</th>
                 <th class="text-end">Breakeven</th>
                 <th class="text-end">Dist. BE%</th>
+                <th class="text-end">Prob &gt; BE%</th>
                 <th>Data Spot</th>
                 <th class="text-end">D. Úteis</th>
                 <th class="text-end">IV impl%</th>
                 <th class="text-end">IV Rank</th>
                 <th class="text-end">HV 21d</th>
-                <th class="text-end">IV-HV</th>
+                <th class="text-end">HV 63d</th>
+                <th class="text-end">HV 126d</th>
+                <th class="text-end">HV 252d</th>
+                <th class="text-end">IV-HV (ref)</th>
                 <th class="text-end">IV Score</th>
                 <th class="text-end">EM2x</th>
                 <th class="text-end">Fluxo 5d</th>
@@ -171,8 +176,8 @@
                   <td class="text-end">
                     {% if opp.illiquidez_flag %}
                       <span class="badge text-bg-warning">Illiq</span>
-                    {% elif (opp.best_ask is none and opp.best_bid is none) %}
-                      <span class="badge text-bg-info" title="Sem book visível; use preço limite perto do justo/último.">Liquidez oculta</span>
+                    {% elif (opp.best_ask is none or opp.best_bid is none) %}
+                      <span class="badge text-bg-info" title="Sem bid/ask completo (spread não calculável). Trate como watchlist, não como Top.">Watchlist</span>
                     {% else %}
                       -
                     {% endif %}
@@ -191,6 +196,9 @@
                     {% if opp.custo_pct is not none %}{{ "%.2f"|format(opp.custo_pct) }}{% else %}-{% endif %}
                   </td>
                   <td class="text-end">
+                    {% if opp.extrinsic_value is not none %}{{ "%.2f"|format(opp.extrinsic_value) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
                     {% if opp.extrinsic_pct_spot is not none %}{{ "%.2f"|format(opp.extrinsic_pct_spot) }}{% else %}-{% endif %}
                   </td>
                   <td class="text-end">
@@ -198,6 +206,9 @@
                   </td>
                   <td class="text-end">
                     {% if opp.breakeven_dist_pct is not none %}{{ "%.2f"|format(opp.breakeven_dist_pct) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if opp.prob_be_pct is not none %}{{ "%.1f"|format(opp.prob_be_pct) }}%{% else %}-{% endif %}
                   </td>
                   <td>{{ opp.underlying_price_date or '-' }}</td>
                   <td class="text-end">{{ opp.dias_uteis or '-' }}</td>
@@ -211,7 +222,20 @@
                     {% if opp.hv_21d is not none %}{{ "%.2f"|format(opp.hv_21d) }}{% else %}-{% endif %}
                   </td>
                   <td class="text-end">
-                    {% if opp.iv_hv_spread is not none %}{{ "%.2f"|format(opp.iv_hv_spread) }}{% else %}-{% endif %}
+                    {% if opp.hv_63d is not none %}{{ "%.2f"|format(opp.hv_63d) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if opp.hv_126d is not none %}{{ "%.2f"|format(opp.hv_126d) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if opp.hv_252d is not none %}{{ "%.2f"|format(opp.hv_252d) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if opp.iv_hv_spread is not none %}
+                      {{ "%.2f"|format(opp.iv_hv_spread) }}{% if opp.hv_ref_window is not none %}<span class="text-muted small"> ({{ opp.hv_ref_window }}d)</span>{% endif %}
+                    {% else %}
+                      -
+                    {% endif %}
                   </td>
                   <td class="text-end">{{ opp.iv_score if opp.iv_score is not none else '-' }}</td>
                   <td class="text-end">{{ opp.em2x_score if opp.em2x_score is not none else '-' }}</td>
@@ -301,9 +325,9 @@
         </div>
       {% endif %}
 
-      <h2 class="h5 mt-4">Oportunidades teóricas (liquidez oculta)</h2>
+      <h2 class="h5 mt-4">Watchlist (sem book / “liquidez oculta”)</h2>
       <p class="text-muted small">
-        Opções sem ask visível no book, mas com preço teórico atrativo. Execução pode depender de market maker reagindo a ordens próximas ao preço justo.
+        Opções sem bid+ask (ou sem spread calculável). Trate como alerta: o “último” pode estar velho e o preço teórico pode não ser executável. O score aplica penalização por staleness, negócios/volume e proxy de OI (titulares/lancadores).
       </p>
       {% if not data.theoretical_opportunities %}
         <p>Nenhuma oportunidade apenas teórica neste snapshot.</p>
@@ -320,13 +344,18 @@
                 <th class="text-end">Dist. preço%</th>
                 <th class="text-end">% p/ 2x</th>
                 <th class="text-end">Custo %</th>
+                <th class="text-end">Extr R$</th>
                 <th class="text-end">Extr.% Spot</th>
                 <th class="text-end">Breakeven</th>
                 <th class="text-end">Dist. BE%</th>
+                <th class="text-end">Prob &gt; BE%</th>
                 <th class="text-end">IV impl%</th>
                 <th class="text-end">IV Rank</th>
                 <th class="text-end">HV 21d</th>
-                <th class="text-end">IV-HV</th>
+                <th class="text-end">HV 63d</th>
+                <th class="text-end">HV 126d</th>
+                <th class="text-end">HV 252d</th>
+                <th class="text-end">IV-HV (ref)</th>
                 <th class="text-end">IV Score</th>
                 <th class="text-end">EM2x</th>
                 <th class="text-end">Fluxo 5d</th>
@@ -360,6 +389,9 @@
                     {% if opp.custo_pct is not none %}{{ "%.2f"|format(opp.custo_pct) }}{% else %}-{% endif %}
                   </td>
                   <td class="text-end">
+                    {% if opp.extrinsic_value is not none %}{{ "%.2f"|format(opp.extrinsic_value) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
                     {% if opp.extrinsic_pct_spot is not none %}{{ "%.2f"|format(opp.extrinsic_pct_spot) }}{% else %}-{% endif %}
                   </td>
                   <td class="text-end">
@@ -367,6 +399,9 @@
                   </td>
                   <td class="text-end">
                     {% if opp.breakeven_dist_pct is not none %}{{ "%.2f"|format(opp.breakeven_dist_pct) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if opp.prob_be_pct is not none %}{{ "%.1f"|format(opp.prob_be_pct) }}%{% else %}-{% endif %}
                   </td>
                   <td class="text-end">
                     {% if opp.vol_impl_perc is not none %}{{ "%.2f"|format(opp.vol_impl_perc) }}{% else %}-{% endif %}
@@ -378,7 +413,20 @@
                     {% if opp.hv_21d is not none %}{{ "%.2f"|format(opp.hv_21d) }}{% else %}-{% endif %}
                   </td>
                   <td class="text-end">
-                    {% if opp.iv_hv_spread is not none %}{{ "%.2f"|format(opp.iv_hv_spread) }}{% else %}-{% endif %}
+                    {% if opp.hv_63d is not none %}{{ "%.2f"|format(opp.hv_63d) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if opp.hv_126d is not none %}{{ "%.2f"|format(opp.hv_126d) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if opp.hv_252d is not none %}{{ "%.2f"|format(opp.hv_252d) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if opp.iv_hv_spread is not none %}
+                      {{ "%.2f"|format(opp.iv_hv_spread) }}{% if opp.hv_ref_window is not none %}<span class="text-muted small"> ({{ opp.hv_ref_window }}d)</span>{% endif %}
+                    {% else %}
+                      -
+                    {% endif %}
                   </td>
                   <td class="text-end">
                     {% if opp.iv_score is not none %}{{ opp.iv_score }}{% else %}-{% endif %}
@@ -473,14 +521,17 @@
                   <th class="text-end">Ask / Ref.</th>
                   <th class="text-end">Spread%</th>
                   <th class="text-end">Illiq?</th>
-                  <th class="text-end">IV impl%</th>
-                  <th class="text-end">IV Rank</th>
-                  <th class="text-end">HV 21d</th>
-                  <th class="text-end">IV-HV</th>
-                  <th class="text-end">% p/ 2x</th>
-                  <th class="text-end">Custo %</th>
-                  <th>Status</th>
-                </tr>
+	                  <th class="text-end">IV impl%</th>
+	                  <th class="text-end">IV Rank</th>
+	                  <th class="text-end">HV 21d</th>
+	                  <th class="text-end">HV 63d</th>
+	                  <th class="text-end">HV 126d</th>
+	                  <th class="text-end">HV 252d</th>
+	                  <th class="text-end">IV-HV (ref)</th>
+	                  <th class="text-end">% p/ 2x</th>
+	                  <th class="text-end">Custo %</th>
+	                  <th>Status</th>
+	                </tr>
               </thead>
               <tbody>
                 {% for opp in segments[key] %}
@@ -501,30 +552,43 @@
                     <td class="text-end">
                       {% if opp.spread_pct is not none %}{{ "%.1f"|format(opp.spread_pct) }}%{% else %}-{% endif %}
                     </td>
-                    <td class="text-end">
+                  <td class="text-end">
                     {% if opp.illiquidez_flag %}
                       <span class="badge text-bg-warning">Illiq</span>
-                    {% elif (opp.best_ask is none and opp.best_bid is none) %}
-                      <span class="badge text-bg-info" title="Sem book visível; use preço limite perto do justo/último.">Liquidez oculta</span>
+                    {% elif (opp.best_ask is none or opp.best_bid is none) %}
+                      <span class="badge text-bg-info" title="Sem bid/ask completo (spread não calculável). Trate como watchlist, não como Top.">Watchlist</span>
                     {% else %}
                       -
                     {% endif %}
-                    </td>
+                  </td>
                     <td class="text-end">
                       {% if opp.vol_impl_perc is not none %}{{ "%.2f"|format(opp.vol_impl_perc) }}{% else %}-{% endif %}
                     </td>
                     <td class="text-end">
                     {% if opp.iv_rank_180d is not none %}{{ "%.1f"|format(opp.iv_rank_180d) }}{% else %}N/A{% endif %}
                     </td>
-                    <td class="text-end">
-                      {% if opp.hv_21d is not none %}{{ "%.2f"|format(opp.hv_21d) }}{% else %}-{% endif %}
-                    </td>
-                    <td class="text-end">
-                      {% if opp.iv_hv_spread is not none %}{{ "%.2f"|format(opp.iv_hv_spread) }}{% else %}-{% endif %}
-                    </td>
-                    <td class="text-end">
-                      {% if opp["%_Alta_p_2x"] is not none %}{{ "%.2f"|format(opp["%_Alta_p_2x"]) }}{% else %}-{% endif %}
-                    </td>
+	                    <td class="text-end">
+	                      {% if opp.hv_21d is not none %}{{ "%.2f"|format(opp.hv_21d) }}{% else %}-{% endif %}
+	                    </td>
+	                    <td class="text-end">
+	                      {% if opp.hv_63d is not none %}{{ "%.2f"|format(opp.hv_63d) }}{% else %}-{% endif %}
+	                    </td>
+	                    <td class="text-end">
+	                      {% if opp.hv_126d is not none %}{{ "%.2f"|format(opp.hv_126d) }}{% else %}-{% endif %}
+	                    </td>
+	                    <td class="text-end">
+	                      {% if opp.hv_252d is not none %}{{ "%.2f"|format(opp.hv_252d) }}{% else %}-{% endif %}
+	                    </td>
+	                    <td class="text-end">
+	                      {% if opp.iv_hv_spread is not none %}
+	                        {{ "%.2f"|format(opp.iv_hv_spread) }}{% if opp.hv_ref_window is not none %}<span class="text-muted small"> ({{ opp.hv_ref_window }}d)</span>{% endif %}
+	                      {% else %}
+	                        -
+	                      {% endif %}
+	                    </td>
+	                    <td class="text-end">
+	                      {% if opp["%_Alta_p_2x"] is not none %}{{ "%.2f"|format(opp["%_Alta_p_2x"]) }}{% else %}-{% endif %}
+	                    </td>
                     <td class="text-end">
                       {% if opp.custo_pct is not none %}{{ "%.2f"|format(opp.custo_pct) }}{% else %}-{% endif %}
                     </td>

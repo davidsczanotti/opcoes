@@ -121,7 +121,10 @@ def record_ranking_entries(
         "breakeven_dist_pct",
         "prob_itm_pct",
         "prob_itm_delta_pct",
+        "prob_be_pct",
         "custo_pct",
+        "extrinsic_value",
+        "extrinsic_pct_spot",
         "spread_pct",
         "iv_hv_spread",
     ]

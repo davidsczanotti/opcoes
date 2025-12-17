@@ -6,7 +6,7 @@ import re
 import statistics
 import datetime as dt
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 import yfinance as yf
 from playwright.async_api import (
@@ -63,6 +63,8 @@ async def scrape_all(
 ) -> None:
     output_csv = Path(output_csv)
     existing_tickers = load_existing_tickers(output_csv)
+    rows_to_write: List[Dict[str, str]] = []
+    rows_to_write_tickers: Set[str] = set()
     fundamentals_map: Dict[str, tuple] = {}
     async with async_playwright() as p:
         launch_kwargs = {"headless": headless}
@@ -285,6 +287,14 @@ async def scrape_all(
                         r["breakeven_price"] = _format_decimal(be_price, decimals=2, signed=False)
                     if be_dist is not None:
                         r["breakeven_dist_pct"] = _format_decimal(be_dist, decimals=2, signed=False)
+
+                    prob_be = None
+                    if be_dist is not None and vol and days:
+                        prob_be = quant.calculate_probability_move(price_info.price, be_dist, vol, days)
+                    if prob_be is not None:
+                        r["prob_be_pct"] = _format_decimal(prob_be * 100.0, decimals=1, signed=False)
+                    else:
+                        r["prob_be_pct"] = ""
                     
                     status_remoto = quant.classify_remote_bet(prob_itm * 100.0 if prob_itm is not None else None, extrinsic_pct, days)
                     r["Status_Remoto"] = status_remoto
@@ -298,6 +308,7 @@ async def scrape_all(
                                 r["breakeven_dist_pct"] = ""
                                 r["prob_itm_pct"] = ""
                                 r["prob_2x_pct"] = ""
+                                r["prob_be_pct"] = ""
                                 r["Status_Remoto"] = ""
                 
                             iv_summary = _summarize_iv(rows)
@@ -373,9 +384,18 @@ async def scrape_all(
                                 _apply_penalties(r)
                 
             snapshot_rows.extend(rows)
-            written = append_rows_dedup(output_csv, rows, existing_tickers)
-            total_written += written
-            print(f"  -> {len(rows)} linhas coletadas (novas: {written}).")
+            new_for_symbol = 0
+            for r in rows:
+                ticker = str(r.get("ticker") or "").strip().upper()
+                if not ticker:
+                    continue
+                if ticker in existing_tickers or ticker in rows_to_write_tickers:
+                    continue
+                rows_to_write.append(r)
+                rows_to_write_tickers.add(ticker)
+                new_for_symbol += 1
+            total_written += new_for_symbol
+            print(f"  -> {len(rows)} linhas coletadas (novas: {new_for_symbol}).")
 
         await browser.close()
         if iv_store:
@@ -385,10 +405,14 @@ async def scrape_all(
         detected_snapshot_date = _infer_snapshot_date(snapshot_rows)
         if detected_snapshot_date:
             snapshot_date = detected_snapshot_date
+        _apply_execution_penalties(snapshot_rows, snapshot_date)
         if snapshot_db:
             snapshot_db.record_underlyings(snapshot_date, price_map, target_symbols)
             snapshot_db.record_options(snapshot_date, snapshot_rows)
             snapshot_db.close()
+        # Grava CSV apenas ao final para que score_total reflita penalidades dependentes da data do snapshot.
+        if rows_to_write:
+            total_written = append_rows_dedup(output_csv, rows_to_write, existing_tickers)
         print(f"Concluído. Novos registros gravados: {total_written}. Arquivo: {output_csv}")
 
 
@@ -1035,6 +1059,125 @@ def _apply_penalties(row: Dict[str, str]) -> None:
     if be_dist is not None and be_dist > 15.0:
         score = max(0.0, score - 2.0)
     row["score_total"] = _format_decimal(score, decimals=2, signed=False)
+
+
+def _apply_execution_penalties(rows: Sequence[Dict[str, str]], snapshot_date: str) -> None:
+    """Penaliza casos sem referência de execução (ask/spread) e sinais de livro fraco.
+
+    Regra prática: se não há ask (ou o spread não pode ser calculado), vira watchlist
+    e o score é ajustado por:
+      - tempo desde o último negócio (data_hora),
+      - nº de negócios do dia (num_neg),
+      - volume financeiro do dia (vol_financeiro),
+      - proxy de OI (titulares/lancadores).
+    """
+
+    try:
+        ref_date = dt.date.fromisoformat(snapshot_date)
+    except ValueError:
+        return
+
+    for row in rows:
+        score = _parse_float(row.get("score_total")) or 0.0
+        if score <= 0.0:
+            continue
+
+        ask = _parse_float(row.get("best_ask"))
+        has_ask = ask is not None and ask > 0
+        has_spread = _parse_float(row.get("spread_pct")) is not None
+        # Se temos ask + spread, consideramos referência suficiente de execução.
+        if has_ask and has_spread:
+            continue
+
+        penalty = _execution_penalty_points(row, ref_date, has_ask=has_ask)
+        if penalty <= 0.0:
+            continue
+        score = max(0.0, score - penalty)
+        row["score_total"] = _format_decimal(score, decimals=2, signed=False)
+
+
+def _execution_penalty_points(row: Dict[str, str], ref_date: dt.date, *, has_ask: bool) -> float:
+    penalty = 0.0
+
+    # Base: sem ask/spread -> alerta vermelho (watchlist).
+    penalty += 1.75 if not has_ask else 1.0
+    if _parse_float(row.get("spread_pct")) is None:
+        penalty += 0.75
+
+    days_since = _days_since_last_trade(row, ref_date)
+    if days_since is None:
+        penalty += 1.0
+    elif days_since <= 1:
+        penalty += 0.0
+    elif days_since <= 3:
+        penalty += 0.5
+    elif days_since <= 7:
+        penalty += 1.5
+    elif days_since <= 30:
+        penalty += 2.5
+    else:
+        penalty += 3.5
+
+    num_neg = _parse_float(row.get("num_neg")) or 0.0
+    vol_fin = _parse_float(row.get("vol_financeiro")) or 0.0
+    liq_status = quant.get_liquidity_status(num_neg, vol_fin)
+    if liq_status == "Alta":
+        penalty += 0.0
+    elif liq_status == "Média":
+        penalty += 0.5
+    elif liq_status == "Baixa":
+        penalty += 1.0
+    else:
+        penalty += 1.5
+
+    oi_proxy = _oi_proxy(row)
+    if oi_proxy is None:
+        penalty += 0.25
+    elif oi_proxy < 2:
+        penalty += 1.0
+    elif oi_proxy < 5:
+        penalty += 0.75
+    elif oi_proxy < 10:
+        penalty += 0.5
+    elif oi_proxy < 20:
+        penalty += 0.25
+    else:
+        penalty += 0.0
+
+    # Cap para não virar negativo com frequência; a intenção é derrubar para watchlist.
+    return min(8.0, max(0.0, penalty))
+
+
+def _days_since_last_trade(row: Dict[str, str], ref_date: dt.date) -> Optional[int]:
+    last_trade = _parse_br_date(row.get("data_hora"))
+    if last_trade is not None:
+        delta = (ref_date - last_trade).days
+        return max(0, delta)
+
+    # Fallback: se houve negócios/volume no dia, assume que foi no ref_date.
+    num_neg = _parse_float(row.get("num_neg")) or 0.0
+    vol_fin = _parse_float(row.get("vol_financeiro")) or 0.0
+    if num_neg > 0.0 or vol_fin > 0.0:
+        return 0
+    return None
+
+
+def _parse_br_date(value: Optional[str]) -> Optional[dt.date]:
+    text = (value or "").strip()
+    if not text:
+        return None
+    try:
+        return dt.datetime.strptime(text, "%d/%m/%Y").date()
+    except ValueError:
+        return None
+
+
+def _oi_proxy(row: Dict[str, str]) -> Optional[float]:
+    titulares = _parse_float(row.get("titulares"))
+    lancadores = _parse_float(row.get("lancadores"))
+    if titulares is None and lancadores is None:
+        return None
+    return max(titulares or 0.0, lancadores or 0.0)
 
 
 def _price_for_buy(row: Dict[str, str], spot_price: Optional[float] = None) -> Optional[float]:

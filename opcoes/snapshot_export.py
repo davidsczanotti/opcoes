@@ -9,6 +9,28 @@ from .scraper.storage import CSV_FIELDS, CSV_WRITER_KWARGS, _ensure_parent, norm
 
 DB_PATH = Path("data/opcoes_snapshots.db")
 
+def _ensure_snapshot_columns(conn: sqlite3.Connection) -> None:
+    try:
+        exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='option_snapshots' LIMIT 1"
+        ).fetchone()
+    except Exception:
+        return
+    if not exists:
+        return
+
+    existing = {
+        row[1]
+        for row in conn.execute('PRAGMA table_info("option_snapshots")').fetchall()
+        if row and len(row) > 1
+    }
+    missing = [col for col in CSV_FIELDS if col not in existing]
+    if not missing:
+        return
+    for col in missing:
+        conn.execute(f'ALTER TABLE "option_snapshots" ADD COLUMN "{col}" TEXT')
+    conn.commit()
+
 
 def export_snapshot(
     *,
@@ -27,6 +49,7 @@ def export_snapshot(
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     try:
+        _ensure_snapshot_columns(conn)
         if snapshot_date is None:
             row = conn.execute("SELECT MAX(snapshot_date) FROM option_snapshots").fetchone()
             if not row or not row[0]:

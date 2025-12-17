@@ -9,6 +9,7 @@ import pytest
 
 from opcoes.report import generate_report
 from opcoes.strategies import get_ranking_context
+from opcoes import quant
 
 
 def _build_prices(base_price: float, log_returns: Iterable[float]) -> list[float]:
@@ -188,6 +189,16 @@ def test_generate_report_computes_iv_and_recurring(monkeypatch, tmp_path, hv_day
     expected_dist = (theo["ultimo"] - theo["preco_teorico"]) / theo["preco_teorico"] * 100.0
     assert theo["distorcao_preco_pct"] == pytest.approx(expected_dist)
 
+    # Probabilidade (proxy) de expirar acima do breakeven (na IV).
+    expected_prob_be = quant.calculate_probability_move(
+        theo["underlying_price"],
+        theo["breakeven_dist_pct"],
+        theo["vol_impl_perc"],
+        theo["dias_uteis"],
+    )
+    assert expected_prob_be is not None
+    assert theo["prob_be_pct"] == pytest.approx(expected_prob_be * 100.0)
+
     # Recorrentes: presença = hits / total de snapshots na janela.
     rec_map = {r["ticker"]: r for r in data.recurring_opportunities}
     assert rec_map["SMAL11"]["hits"] == 5
@@ -211,3 +222,31 @@ def test_ranking_context_filters_by_option_type(monkeypatch, tmp_path) -> None:
     ctx_puts = get_ranking_context({"option_type": "PUT"})
     assert not ctx_puts["data"].opportunities
     assert not ctx_puts["data"].theoretical_opportunities
+
+
+def test_generate_report_requires_bid_and_ask_for_top(monkeypatch, tmp_path) -> None:
+    db_path = tmp_path / "opcoes.db"
+    monkeypatch.setenv("OPCOES_DB_PATH", str(db_path))
+    _setup_db(str(db_path))
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO option_snapshots (
+                snapshot_date, ticker, underlying, option_type, score_total, trend_flag,
+                dias_uteis, delta, ultimo, best_ask, preco_teorico
+            )
+            VALUES (
+                '2025-11-28', 'BOOKL1', 'WEGE3', 'CALL', '8.50', '1',
+                '40', '0,50', '0,49', '0,50', '0,52'
+            )
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    data = generate_report(min_score=8, limit=30, recurring_days=30, recurring_limit=15)
+    assert not data.opportunities  # sem bid, spread não é calculável -> watchlist/teóricas
+    assert any(o["ticker"] == "BOOKL1" for o in data.theoretical_opportunities)
