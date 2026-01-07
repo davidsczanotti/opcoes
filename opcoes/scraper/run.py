@@ -230,14 +230,15 @@ async def scrape_all(
                     r["underlying_return_3m"] = _format_decimal(price_info.return_3m, decimals=2, signed=False)
                     r["trend_flag"] = str(price_info.trend_flag) if price_info.trend_flag is not None else ""
                     r["trend_reason"] = price_info.trend_reason
+                    opt_type = _normalize_option_type(r.get("option_type"), r.get("ticker"))
                     # Preenche preços adicionais (teórico, spread, ask)
-                    theo_price = _compute_theoretical_price(r, spot_price=price_info.price)
+                    theo_price = _compute_theoretical_price(r, spot_price=price_info.price, option_type=opt_type)
                     if theo_price is not None:
                         r["preco_teorico"] = _format_decimal(theo_price, decimals=2, signed=False)
                     spread_pct = _compute_spread_pct(r)
                     if spread_pct is not None:
                         r["spread_pct"] = _format_decimal(spread_pct, decimals=2, signed=False)
-                    price_buy = _price_for_buy(r, spot_price=price_info.price)
+                    price_buy = _price_for_buy(r, spot_price=price_info.price, option_type=opt_type)
                     
                     distorcao_pct = None
                     if price_buy is not None and theo_price is not None:
@@ -253,14 +254,14 @@ async def scrape_all(
                     
                     prob_itm = None
                     if strike and vol and days:
-                        prob_itm = quant.calculate_probability_itm(price_info.price, strike, vol, days)
+                        prob_itm = quant.calculate_probability_itm(price_info.price, strike, vol, days, option_type=opt_type)
                     if prob_itm is not None:
                         r["prob_itm_pct"] = _format_decimal(prob_itm * 100.0, decimals=1, signed=False)
                     
                     pct_to_double = _parse_float(r.get("%_Alta_p_2x"))
                     prob_2x = None
                     if pct_to_double and vol and days:
-                        prob_2x = quant.calculate_probability_move(price_info.price, pct_to_double, vol, days)
+                        prob_2x = quant.calculate_probability_move(price_info.price, pct_to_double, vol, days, option_type=opt_type)
                     if prob_2x is not None:
                         r["prob_2x_pct"] = _format_decimal(prob_2x * 100.0, decimals=1, signed=False)
                     
@@ -271,7 +272,9 @@ async def scrape_all(
                     
                     intrinsic, extrinsic = None, None
                     if price_buy is not None and strike is not None:
-                        intrinsic, extrinsic = quant.calculate_intrinsic_extrinsic(price_buy, strike, price_info.price)
+                        intrinsic, extrinsic = quant.calculate_intrinsic_extrinsic(
+                            price_buy, strike, price_info.price, option_type=opt_type
+                        )
                     r["intrinsic_value"] = _format_decimal(intrinsic, decimals=2, signed=False) if intrinsic is not None else ""
                     r["extrinsic_value"] = _format_decimal(extrinsic, decimals=2, signed=False) if extrinsic is not None else ""
                     
@@ -282,7 +285,9 @@ async def scrape_all(
                     
                     be_price, be_dist = None, None
                     if strike is not None and price_buy is not None:
-                        be_price, be_dist = quant.calculate_breakeven(price_info.price, strike, price_buy)
+                        be_price, be_dist = quant.calculate_breakeven(
+                            price_info.price, strike, price_buy, option_type=opt_type
+                        )
                     if be_price is not None:
                         r["breakeven_price"] = _format_decimal(be_price, decimals=2, signed=False)
                     if be_dist is not None:
@@ -290,7 +295,9 @@ async def scrape_all(
 
                     prob_be = None
                     if be_dist is not None and vol and days:
-                        prob_be = quant.calculate_probability_move(price_info.price, be_dist, vol, days)
+                        prob_be = quant.calculate_probability_move(
+                            price_info.price, abs(be_dist), vol, days, option_type=opt_type
+                        )
                     if prob_be is not None:
                         r["prob_be_pct"] = _format_decimal(prob_be * 100.0, decimals=1, signed=False)
                     else:
@@ -1046,6 +1053,14 @@ def _normalize_underlying(value: Optional[str]) -> str:
     return (value or "").strip().upper()
 
 
+def _normalize_option_type(value: Optional[str], ticker: Optional[str] = None) -> str:
+    text = (value or "").strip().upper()
+    if text in {"CALL", "PUT"}:
+        return text
+    inferred = infer_option_type(ticker or "")
+    return inferred or ""
+
+
 def _normalize_ticker(value: Optional[str]) -> str:
     return (value or "").strip().upper()
 
@@ -1056,7 +1071,7 @@ def _apply_penalties(row: Dict[str, str]) -> None:
     if spread is not None and spread > 20.0:
         score = max(0.0, score / 2.0)
     be_dist = _parse_float(row.get("breakeven_dist_pct"))
-    if be_dist is not None and be_dist > 15.0:
+    if be_dist is not None and abs(be_dist) > 15.0:
         score = max(0.0, score - 2.0)
     row["score_total"] = _format_decimal(score, decimals=2, signed=False)
 
@@ -1180,13 +1195,17 @@ def _oi_proxy(row: Dict[str, str]) -> Optional[float]:
     return max(titulares or 0.0, lancadores or 0.0)
 
 
-def _price_for_buy(row: Dict[str, str], spot_price: Optional[float] = None) -> Optional[float]:
+def _price_for_buy(
+    row: Dict[str, str],
+    spot_price: Optional[float] = None,
+    option_type: Optional[str] = None,
+) -> Optional[float]:
     ask = _parse_float(row.get("best_ask"))
     if ask is not None and ask > 0:
         return ask
     # Sem ask: tenta preço teórico se tivermos spot
     if spot_price is not None and spot_price > 0:
-        theoretical = _compute_theoretical_price(row, spot_price=spot_price)
+        theoretical = _compute_theoretical_price(row, spot_price=spot_price, option_type=option_type)
         if theoretical is not None and theoretical > 0:
             return theoretical
     # Último negócio só como último fallback
@@ -1207,7 +1226,11 @@ def _compute_spread_pct(row: Dict[str, str]) -> Optional[float]:
     return (ask - bid) / mid * 100.0
 
 
-def _compute_theoretical_price(row: Dict[str, str], spot_price: Optional[float]) -> Optional[float]:
+def _compute_theoretical_price(
+    row: Dict[str, str],
+    spot_price: Optional[float],
+    option_type: Optional[str] = None,
+) -> Optional[float]:
 
     if spot_price is None or spot_price <= 0:
         return None
@@ -1217,6 +1240,9 @@ def _compute_theoretical_price(row: Dict[str, str], spot_price: Optional[float])
     if vol is None or strike is None or days is None or days <= 0 or vol <= 0:
         return None
     try:
+        opt_type = _normalize_option_type(option_type or row.get("option_type"), row.get("ticker"))
+        if opt_type == "PUT":
+            return quant.calculate_black_scholes_put(spot_price, strike, vol / 100.0, days / 252.0)
         return quant.calculate_black_scholes_call(spot_price, strike, vol / 100.0, days / 252.0)
     except Exception:
         return None

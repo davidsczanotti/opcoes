@@ -44,10 +44,47 @@ def test_black_scholes_call():
     bs = quant.calculate_black_scholes_call(100, 100, 0.2, 1.0)
     assert 7.9 < bs < 8.0
 
+
+def test_black_scholes_put_parity():
+    call = quant.calculate_black_scholes_call(100, 100, 0.2, 1.0)
+    put = quant.calculate_black_scholes_put(100, 100, 0.2, 1.0)
+    assert abs(call - put) < 1e-6
+
 def test_calculate_probability_itm():
     # ATM, 50% chance approx (ignoring drift/risk-neutral shift mostly for short term)
     prob = quant.calculate_probability_itm(100, 100, 0.2, 1.0)
     assert 0.4 < prob < 0.6 
+
+
+def test_calculate_probability_itm_put_complements_call():
+    prob_call = quant.calculate_probability_itm(100, 100, 20.0, 252, option_type="CALL")
+    prob_put = quant.calculate_probability_itm(100, 100, 20.0, 252, option_type="PUT")
+    assert prob_call is not None
+    assert prob_put is not None
+    assert prob_put > prob_call
+    assert abs((prob_call + prob_put) - 1.0) < 1e-6
+
+
+def test_calculate_probability_move_put_direction():
+    prob_up = quant.calculate_probability_move(100, 10.0, 20.0, 252, option_type="CALL")
+    prob_down = quant.calculate_probability_move(100, 10.0, 20.0, 252, option_type="PUT")
+    assert prob_up is not None
+    assert prob_down is not None
+    assert 0.0 < prob_up < 1.0
+    assert 0.0 < prob_down < 1.0
+    assert prob_down > prob_up
+
+
+def test_calculate_intrinsic_extrinsic_put():
+    intrinsic, extrinsic = quant.calculate_intrinsic_extrinsic(15.0, 100.0, 90.0, option_type="PUT")
+    assert intrinsic == pytest.approx(10.0)
+    assert extrinsic == pytest.approx(5.0)
+
+
+def test_calculate_breakeven_put():
+    be_price, dist = quant.calculate_breakeven(100.0, 100.0, 5.0, option_type="PUT")
+    assert be_price == pytest.approx(95.0)
+    assert dist == pytest.approx(-5.0)
 
 def test_calculate_weighted_score():
     score = quant.calculate_weighted_score(
@@ -63,3 +100,31 @@ def test_calculate_weighted_score():
         status_remote=""
     )
     assert score > 5.0 # Deve ser alto
+
+
+def test_calculate_weighted_score_put_metrics():
+    spot = 100.0
+    strike = 110.0
+    vol = 20.0
+    days = 252.0
+    option_price = 12.0
+
+    intrinsic, extrinsic = quant.calculate_intrinsic_extrinsic(
+        option_price, strike, spot, option_type="PUT"
+    )
+    extrinsic_pct = quant.calculate_extrinsic_pct(extrinsic or 0.0, spot)
+    prob_itm = quant.calculate_probability_itm(spot, strike, vol, days, option_type="PUT")
+
+    score = quant.calculate_weighted_score(
+        moneyness_score=2.0,
+        prob_itm_pct=(prob_itm or 0.0) * 100.0,
+        prob_itm_delta_pct=None,
+        extrinsic_pct_spot=extrinsic_pct,
+        liquidity_score=2.0,
+        iv_score=2.0,
+        theta_score=1.0,
+        em2x_score=2.0,
+        double_score=2.0,
+        status_remote="",
+    )
+    assert score > 6.0

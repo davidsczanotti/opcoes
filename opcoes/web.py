@@ -18,7 +18,7 @@ from .settings import (
     update_fee_settings,
     update_strategy_settings,
 )
-from .strategies import get_cash_covered_put_context, get_covered_call_context, get_ranking_context
+from .strategies import get_cash_covered_put_context, get_covered_call_context, get_fundamentus_context, get_ranking_context
 from . import finance, darf
 
 
@@ -39,6 +39,11 @@ def create_app() -> Flask:
     def cash_covered_put() -> str:
         ctx = get_cash_covered_put_context(request.args)
         return render_template("cash_covered_put.html", **ctx)
+
+    @app.route("/fundamentus")
+    def fundamentus() -> str:
+        ctx = get_fundamentus_context(request.args)
+        return render_template("fundamentus.html", **ctx)
 
     @app.route("/darf")
     def darf_view() -> str:

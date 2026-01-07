@@ -3,6 +3,13 @@ import statistics
 from typing import Dict, List, Optional, Tuple
 
 
+def _normalize_option_type(option_type: Optional[str]) -> str:
+    text = (option_type or "").strip().upper()
+    if text in {"CALL", "PUT"}:
+        return text
+    return "CALL"
+
+
 def score_moneyness(dist_perc: Optional[float]) -> float:
     """Escala contínua: melhor quanto mais colado/ITM; zera a 20% OTM."""
     if dist_perc is None:
@@ -266,8 +273,27 @@ def calculate_black_scholes_call(
     return spot * math.exp(-div * years) * nd1 - strike * math.exp(-rate * years) * nd2
 
 
-def calculate_probability_itm(spot: float, strike: float, vol: float, days: float) -> Optional[float]:
-    """Probabilidade neutra ao risco de expirar ITM (approx N(d2))."""
+def calculate_black_scholes_put(
+    spot: float, strike: float, vol: float, years: float, rate: float = 0.0, div: float = 0.0
+) -> float:
+    if spot <= 0 or strike <= 0 or vol <= 0 or years <= 0:
+        return 0.0
+    sqrt_t = math.sqrt(years)
+    d1 = (math.log(spot / strike) + (rate - div + 0.5 * vol * vol) * years) / (vol * sqrt_t)
+    d2 = d1 - vol * sqrt_t
+    nd1 = 0.5 * (1.0 + math.erf(-d1 / math.sqrt(2)))
+    nd2 = 0.5 * (1.0 + math.erf(-d2 / math.sqrt(2)))
+    return strike * math.exp(-rate * years) * nd2 - spot * math.exp(-div * years) * nd1
+
+
+def calculate_probability_itm(
+    spot: float,
+    strike: float,
+    vol: float,
+    days: float,
+    option_type: Optional[str] = "CALL",
+) -> Optional[float]:
+    """Probabilidade neutra ao risco de expirar ITM (CALL: N(d2), PUT: N(-d2))."""
     if spot <= 0 or strike <= 0 or vol <= 0 or days <= 0:
         return None
     sigma = vol / 100.0
@@ -278,28 +304,51 @@ def calculate_probability_itm(spot: float, strike: float, vol: float, days: floa
     d1 = (math.log(spot / strike) + 0.5 * sigma * sigma * t) / denom
     d2 = d1 - denom
     prob_itm = 0.5 * (1.0 + math.erf(d2 / math.sqrt(2)))
+    if _normalize_option_type(option_type) == "PUT":
+        prob_itm = 1.0 - prob_itm
     return max(0.0, min(1.0, prob_itm))
 
 
-def calculate_probability_move(spot: float, pct_move: float, vol: float, days: float) -> Optional[float]:
-    """Probabilidade neutra ao risco de subir pelo menos pct_move (em %)."""
+def calculate_probability_move(
+    spot: float,
+    pct_move: float,
+    vol: float,
+    days: float,
+    option_type: Optional[str] = "CALL",
+) -> Optional[float]:
+    """Probabilidade neutra ao risco de mover ao menos pct_move (CALL: alta, PUT: baixa)."""
     if pct_move <= 0 or spot <= 0 or vol <= 0 or days <= 0:
         return None
-    target = spot * (1.0 + pct_move / 100.0)
+    direction = "DOWN" if _normalize_option_type(option_type) == "PUT" else "UP"
+    if direction == "DOWN":
+        target = spot * (1.0 - pct_move / 100.0)
+    else:
+        target = spot * (1.0 + pct_move / 100.0)
+    if target <= 0:
+        return None
     sigma = vol / 100.0
     t = days / 252.0
     denom = sigma * math.sqrt(t)
     if denom <= 0:
         return None
     z = (math.log(target / spot) + 0.5 * sigma * sigma * t) / denom
-    prob = 1.0 - 0.5 * (1.0 + math.erf(z / math.sqrt(2)))
+    cdf = 0.5 * (1.0 + math.erf(z / math.sqrt(2)))
+    prob = cdf if direction == "DOWN" else (1.0 - cdf)
     return max(0.0, min(1.0, prob))
 
 
-def calculate_breakeven(spot: float, strike: float, price: float) -> Tuple[Optional[float], Optional[float]]:
+def calculate_breakeven(
+    spot: float,
+    strike: float,
+    price: float,
+    option_type: Optional[str] = "CALL",
+) -> Tuple[Optional[float], Optional[float]]:
     if spot <= 0 or strike <= 0 or price <= 0:
         return None, None
-    be_price = strike + price
+    if _normalize_option_type(option_type) == "PUT":
+        be_price = strike - price
+    else:
+        be_price = strike + price
     dist_pct = ((be_price - spot) / spot) * 100.0
     return be_price, dist_pct
 
@@ -358,10 +407,18 @@ def calculate_cost_pct(option_price: float, spot_price: float) -> Optional[float
     return (option_price / spot_price) * 100.0
 
 
-def calculate_intrinsic_extrinsic(option_price: float, strike: float, spot_price: float) -> Tuple[Optional[float], Optional[float]]:
+def calculate_intrinsic_extrinsic(
+    option_price: float,
+    strike: float,
+    spot_price: float,
+    option_type: Optional[str] = "CALL",
+) -> Tuple[Optional[float], Optional[float]]:
     if spot_price <= 0:
         return None, None
-    intrinsic = max(spot_price - strike, 0.0)
+    if _normalize_option_type(option_type) == "PUT":
+        intrinsic = max(strike - spot_price, 0.0)
+    else:
+        intrinsic = max(spot_price - strike, 0.0)
     extrinsic = max(option_price - intrinsic, 0.0)
     return intrinsic, extrinsic
 
@@ -370,4 +427,3 @@ def calculate_extrinsic_pct(extrinsic: float, spot_price: float) -> Optional[flo
     if spot_price <= 0:
         return None
     return (extrinsic / spot_price) * 100.0
-

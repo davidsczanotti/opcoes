@@ -11,6 +11,7 @@ from .report import generate_report
 from .snapshot_export import export_snapshot
 from .tax import compute_tax
 from .backfill_yfinance import backfill_prices
+from .fundamentus import FundamentusFilterConfig, apply_filters, latest_snapshot_date, scrape_and_store
 from .history import cleanup_history, list_decisions, record_decision, record_ranking_entries
 
 
@@ -233,6 +234,77 @@ def parse_args() -> argparse.Namespace:
     tc.add_argument("--year", type=int, required=True, help="Ano (YYYY)")
     tc.add_argument("--month", type=int, required=True, help="Mês (1-12)")
 
+    fc = sub.add_parser("fundamentus", help="Coleta Fundamentus (busca avançada)")
+    fc.add_argument("--pl-min", type=float, default=0.0, help="Filtro mínimo de P/L (default: 0)")
+    fc.add_argument(
+        "--patrim-min",
+        type=float,
+        default=0.0,
+        help="Filtro mínimo de Patrimônio Líquido (default: 0)",
+    )
+    fc.add_argument(
+        "--timeout",
+        type=float,
+        default=30.0,
+        help="Timeout da requisição ao Fundamentus (s).",
+    )
+    fc.add_argument(
+        "--snapshot-date",
+        type=str,
+        default=None,
+        help="Data do snapshot (YYYY-MM-DD). Default: hoje.",
+    )
+
+    default_cfg = FundamentusFilterConfig()
+    ff = sub.add_parser("fundamentus-filter", help="Aplica filtros Fundamentus no snapshot")
+    ff.add_argument(
+        "--snapshot-date",
+        type=str,
+        default=None,
+        help="Data do snapshot (YYYY-MM-DD). Default: última disponível.",
+    )
+    ff.add_argument(
+        "--liq-2m-min",
+        type=float,
+        default=default_cfg.liq_2m_min,
+        help="Liquidez 2m mínima (default: 1.000.000).",
+    )
+    ff.add_argument(
+        "--div-bruta-patrim-max",
+        type=float,
+        default=default_cfg.div_bruta_patrim_max,
+        help="Dív. Bruta/Patrim máximo (default: 2).",
+    )
+    ff.add_argument(
+        "--cresc-rec-5a-min",
+        type=float,
+        default=default_cfg.cresc_rec_5a_min,
+        help="Cresc. Rec. 5a mínimo (default: 0).",
+    )
+    ff.add_argument(
+        "--div-yield-min",
+        type=float,
+        default=default_cfg.div_yield_min,
+        help="Dividend Yield mínimo (default: 6).",
+    )
+    ff.add_argument(
+        "--roe-min",
+        type=float,
+        default=default_cfg.roe_min,
+        help="ROE mínimo (default: 15).",
+    )
+    ff.add_argument(
+        "--margem-liquida-min",
+        type=float,
+        default=default_cfg.margem_liquida_min,
+        help="Margem Líquida mínima (default: 10).",
+    )
+    ff.add_argument(
+        "--no-margem-liquida-zero",
+        action="store_true",
+        help="Desativa a exceção de margem líquida igual a 0%.",
+    )
+
     return parser.parse_args()
 
 
@@ -385,6 +457,40 @@ def main() -> None:
         total_ir = summary.swing_ir + summary.daytrade_ir
         total_irrf = summary.swing_irrf + summary.daytrade_irrf
         print(f"  Total IR devido: R$ {total_ir:.2f} (IRRF a compensar: R$ {total_irrf:.2f})")
+    elif args.cmd == "fundamentus":
+        snap = None
+        if args.snapshot_date:
+            snap = _parse_trade_date(args.snapshot_date)
+        count = scrape_and_store(
+            pl_min=args.pl_min,
+            patrim_min=args.patrim_min,
+            timeout=args.timeout,
+            snapshot_date=snap,
+        )
+        print(f"Fundamentus: {count} linhas gravadas no snapshot {snap or dt.date.today().isoformat()}.")
+    elif args.cmd == "fundamentus-filter":
+        snap = None
+        if args.snapshot_date:
+            snap = _parse_trade_date(args.snapshot_date)
+        cfg = FundamentusFilterConfig(
+            liq_2m_min=args.liq_2m_min,
+            div_bruta_patrim_max=args.div_bruta_patrim_max,
+            cresc_rec_5a_min=args.cresc_rec_5a_min,
+            div_yield_min=args.div_yield_min,
+            roe_min=args.roe_min,
+            margem_liquida_min=args.margem_liquida_min,
+            margem_liquida_allow_zero=not args.no_margem_liquida_zero,
+        )
+        results = apply_filters(snapshot_date=snap, cfg=cfg)
+        if results["total"] == 0:
+            print("Fundamentus: nenhum snapshot disponível para filtrar.")
+        else:
+            used_snap = snap or latest_snapshot_date()
+            print(
+                "Fundamentus filtros: "
+                f"{results['approved']} aprovadas, {results['rejected']} reprovadas "
+                f"(total {results['total']}) no snapshot {used_snap}."
+            )
     else:
         raise SystemExit(f"Comando desconhecido: {args.cmd}")
 
