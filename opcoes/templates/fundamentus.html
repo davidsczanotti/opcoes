@@ -287,6 +287,11 @@
                     Etapa <span class="sort-indicator"></span>
                   </button>
                 </th>
+                <th data-type="text">
+                  <button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-start" data-index="24" data-type="text">
+                    Setor <span class="sort-indicator"></span>
+                  </button>
+                </th>
               </tr>
               <tr>
                 <th>
@@ -360,6 +365,9 @@
                 </th>
                 <th>
                   <input class="form-control form-control-sm column-filter" data-index="23" data-type="number" placeholder=">=0" title="Use >, <, <=, >= para comparar">
+                </th>
+                <th>
+                  <input class="form-control form-control-sm column-filter" data-index="24" data-type="text" placeholder="filtrar">
                 </th>
               </tr>
             </thead>
@@ -454,10 +462,35 @@
                       -
                     {% endif %}
                   </td>
+                  <td>{{ row.sector or '-' }}</td>
                 </tr>
               {% endfor %}
             </tbody>
           </table>
+        </div>
+      {% endif %}
+
+      {% if sector_breakdown %}
+        <div class="card mt-3">
+          <div class="card-header">Divisao por setor</div>
+          <div class="card-body">
+            <div class="row align-items-center">
+              <div class="col-lg-6">
+                <canvas id="sector-chart" width="300" height="300" aria-label="Grafico de setores"></canvas>
+              </div>
+              <div class="col-lg-6 mt-3 mt-lg-0">
+                <ul class="list-unstyled small mb-0">
+                  {% for item in sector_breakdown %}
+                    <li class="d-flex align-items-center mb-1">
+                      <span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:{{ item.color }};margin-right:8px;"></span>
+                      <span class="me-auto">{{ item.label }}</span>
+                      <span class="text-muted">{{ item.count }} ({{ "%.0f"|format(item.pct) }}%)</span>
+                    </li>
+                  {% endfor %}
+                </ul>
+              </div>
+            </div>
+          </div>
         </div>
       {% endif %}
 
@@ -594,6 +627,31 @@
         });
 
         updateIndicators();
+      })();
+
+      (() => {
+        const canvas = document.getElementById("sector-chart");
+        if (!canvas) return;
+        const data = {{ sector_breakdown | tojson }};
+        if (!data || !data.length) return;
+        const total = data.reduce((sum, item) => sum + (item.count || 0), 0);
+        if (!total) return;
+        const ctx = canvas.getContext("2d");
+        const size = Math.min(canvas.width, canvas.height);
+        const cx = canvas.width / 2;
+        const cy = canvas.height / 2;
+        const radius = size * 0.45;
+        let start = -Math.PI / 2;
+        data.forEach((item) => {
+          const slice = (item.count / total) * Math.PI * 2;
+          ctx.beginPath();
+          ctx.moveTo(cx, cy);
+          ctx.arc(cx, cy, radius, start, start + slice);
+          ctx.closePath();
+          ctx.fillStyle = item.color || "#888";
+          ctx.fill();
+          start += slice;
+        });
       })();
     </script>
   </body>

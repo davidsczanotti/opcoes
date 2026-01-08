@@ -412,7 +412,9 @@ def _fetch_recurring_opportunities(
             f.dias_uteis AS dias_uteis
         FROM agg
         LEFT JOIN filtered f ON f.ticker = agg.ticker AND f.snapshot_date = agg.last_seen
-        ORDER BY agg.hits DESC, agg.last_seen DESC
+        ORDER BY agg.hits DESC,
+                 CAST(REPLACE(f.score_total, ',', '.') AS REAL) DESC,
+                 agg.last_seen DESC
         LIMIT ?
     """
     rows = conn.execute(filtered_query, (window_start, min_score, limit)).fetchall()
