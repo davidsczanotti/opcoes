@@ -47,11 +47,31 @@
         {% if limit is not none %}
           {% set qs_limit = '&limit=' ~ limit %}
         {% endif %}
+        {% set qs_window = '' %}
+        {% if ranking_window_days %}
+          {% set qs_window = '&window_days=' ~ ranking_window_days %}
+        {% endif %}
         <div class="btn-group btn-group-sm mb-3" role="group" aria-label="Filtro de status">
-          <a class="btn btn-outline-secondary {% if status_filter == 'approved' %}active{% endif %}" href="?status=approved{{ qs_date }}{{ qs_limit }}">Aprovadas</a>
-          <a class="btn btn-outline-secondary {% if status_filter == 'rejected' %}active{% endif %}" href="?status=rejected{{ qs_date }}{{ qs_limit }}">Reprovadas</a>
-          <a class="btn btn-outline-secondary {% if status_filter == 'all' %}active{% endif %}" href="?status=all{{ qs_date }}{{ qs_limit }}">Todas</a>
+          <a class="btn btn-outline-secondary {% if status_filter == 'approved' %}active{% endif %}" href="?status=approved{{ qs_date }}{{ qs_limit }}{{ qs_window }}">Aprovadas</a>
+          <a class="btn btn-outline-secondary {% if status_filter == 'rejected' %}active{% endif %}" href="?status=rejected{{ qs_date }}{{ qs_limit }}{{ qs_window }}">Reprovadas</a>
+          <a class="btn btn-outline-secondary {% if status_filter == 'all' %}active{% endif %}" href="?status=all{{ qs_date }}{{ qs_limit }}{{ qs_window }}">Todas</a>
         </div>
+        <form class="row g-2 align-items-end mb-3" method="get" action="/fundamentus">
+          <input type="hidden" name="status" value="{{ status_filter }}">
+          {% if snapshot_date %}
+            <input type="hidden" name="date" value="{{ snapshot_date }}">
+          {% endif %}
+          {% if limit is not none %}
+            <input type="hidden" name="limit" value="{{ limit }}">
+          {% endif %}
+          <div class="col-auto">
+            <label class="form-label small">Janela (dias)</label>
+            <input type="number" name="window_days" class="form-control form-control-sm" value="{{ ranking_window_days }}" min="1">
+          </div>
+          <div class="col-auto">
+            <button class="btn btn-outline-secondary btn-sm" type="submit">Atualizar janela</button>
+          </div>
+        </form>
       {% endif %}
 
       {% if rows and not signals_available %}
@@ -65,6 +85,80 @@
       {% else %}
         <div class="alert alert-info" role="alert">
           Em construcao. Esta aba vai concentrar o filtro fundamentalista e avisos da estrategia.
+        </div>
+      {% endif %}
+
+      {% if signals_available %}
+        <div class="row mb-3">
+          <div class="col-lg-6 mb-3 mb-lg-0">
+            <div class="card h-100">
+              <div class="card-header">Ranking historico (aprovadas)</div>
+              <div class="card-body p-0">
+                <div class="table-responsive">
+                  <table class="table table-sm mb-0">
+                    <thead class="table-light">
+                      <tr>
+                        <th>Papel</th>
+                        <th class="text-end">Aparicoes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {% if ranking_total %}
+                        {% for item in ranking_total %}
+                          <tr>
+                            <td>{{ item.papel }}</td>
+                            <td class="text-end">{{ item.approvals }}</td>
+                          </tr>
+                        {% endfor %}
+                      {% else %}
+                        <tr>
+                          <td colspan="2" class="text-muted text-center">Sem dados.</td>
+                        </tr>
+                      {% endif %}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="col-lg-6">
+            <div class="card h-100">
+              <div class="card-header">
+                Ranking ultimos {{ ranking_window_days }} dias (aprovadas)
+              </div>
+              <div class="card-body p-0">
+                <div class="table-responsive">
+                  <table class="table table-sm mb-0">
+                    <thead class="table-light">
+                      <tr>
+                        <th>Papel</th>
+                        <th class="text-end">Aparicoes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {% if ranking_window %}
+                        {% for item in ranking_window %}
+                          <tr>
+                            <td>{{ item.papel }}</td>
+                            <td class="text-end">{{ item.approvals }}</td>
+                          </tr>
+                        {% endfor %}
+                      {% else %}
+                        <tr>
+                          <td colspan="2" class="text-muted text-center">Sem dados.</td>
+                        </tr>
+                      {% endif %}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              {% if ranking_window_start and ranking_window_end %}
+                <div class="card-footer text-muted small">
+                  Periodo: {{ ranking_window_start }} a {{ ranking_window_end }}
+                </div>
+              {% endif %}
+            </div>
+          </div>
         </div>
       {% endif %}
 

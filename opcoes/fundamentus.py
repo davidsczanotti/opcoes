@@ -536,6 +536,50 @@ def fetch_signals(
         conn.close()
 
 
+def fetch_approved_ranking(
+    *,
+    window_days: Optional[int] = None,
+    snapshot_date: Optional[str] = None,
+    limit: int = 20,
+    db_path: Optional[Path] = None,
+) -> Dict[str, object]:
+    conn = _connect(db_path)
+    try:
+        end_date = snapshot_date or latest_snapshot_date(db_path=db_path)
+        if not end_date:
+            return {"rows": [], "start_date": None, "end_date": None, "window_days": window_days}
+        start_date: Optional[str] = None
+        if window_days and window_days > 0:
+            try:
+                end_dt = dt.date.fromisoformat(end_date)
+                start_dt = end_dt - dt.timedelta(days=max(window_days - 1, 0))
+                start_date = start_dt.isoformat()
+            except ValueError:
+                start_date = None
+
+        query = "SELECT papel, COUNT(*) AS approvals FROM fundamentus_signals WHERE status = 'approved'"
+        params: list[object] = []
+        if start_date:
+            query += " AND snapshot_date BETWEEN ? AND ?"
+            params.extend([start_date, end_date])
+        elif snapshot_date:
+            query += " AND snapshot_date <= ?"
+            params.append(end_date)
+        query += " GROUP BY papel ORDER BY approvals DESC, papel ASC"
+        if limit:
+            query += " LIMIT ?"
+            params.append(int(limit))
+        rows = conn.execute(query, params).fetchall()
+        return {
+            "rows": [{"papel": r["papel"], "approvals": r["approvals"]} for r in rows],
+            "start_date": start_date,
+            "end_date": end_date,
+            "window_days": window_days,
+        }
+    finally:
+        conn.close()
+
+
 __all__ = [
     "FundamentusFilterConfig",
     "fetch_fundamentus_results",
@@ -550,4 +594,5 @@ __all__ = [
     "latest_snapshot_date",
     "fetch_snapshot",
     "fetch_signals",
+    "fetch_approved_ranking",
 ]

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Mapping, Optional
 
-from ..fundamentus import fetch_signals, fetch_snapshot, latest_snapshot_date
+from ..fundamentus import fetch_approved_ranking, fetch_signals, fetch_snapshot, latest_snapshot_date
 
 
 def _get_optional_int_arg(args: Mapping[str, Any], name: str) -> Optional[int]:
@@ -13,6 +13,16 @@ def _get_optional_int_arg(args: Mapping[str, Any], name: str) -> Optional[int]:
         return int(raw)
     except (TypeError, ValueError):
         return None
+
+
+def _get_int_arg(args: Mapping[str, Any], name: str, default: int) -> int:
+    try:
+        raw = args.get(name)
+        if raw is None or str(raw).strip() == "":
+            return default
+        return int(raw)
+    except (TypeError, ValueError):
+        return default
 
 
 def _get_status_filter(args: Mapping[str, Any], *, has_signals: bool) -> str:
@@ -54,6 +64,14 @@ def get_fundamentus_context(args: Mapping[str, Any]) -> Dict[str, Any]:
     status_label = {"approved": "Aprovadas", "rejected": "Reprovadas", "all": "Todas"}.get(
         status_filter, "Todas"
     )
+
+    window_days = max(1, _get_int_arg(args, "window_days", 30))
+    ranking_total = fetch_approved_ranking(snapshot_date=snap or None, limit=20)
+    ranking_window = fetch_approved_ranking(
+        snapshot_date=snap or None,
+        window_days=window_days,
+        limit=20,
+    )
     return {
         "status": "em_construcao" if not rows else "ok",
         "message": message,
@@ -67,6 +85,11 @@ def get_fundamentus_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         "rejected_count": rejected_count,
         "status_filter": status_filter,
         "status_label": status_label,
+        "ranking_total": ranking_total["rows"],
+        "ranking_window": ranking_window["rows"],
+        "ranking_window_days": window_days,
+        "ranking_window_start": ranking_window["start_date"],
+        "ranking_window_end": ranking_window["end_date"],
     }
 
 
