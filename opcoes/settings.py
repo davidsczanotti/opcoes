@@ -43,6 +43,11 @@ class CoveredCallSettings:
     min_dist_strike: float = 1.0
 
 
+@dataclass
+class FundamentusSettings:
+    target_yield_pct: float = 8.0
+
+
 def _connect() -> sqlite3.Connection:
     db_path = get_db_path()
     conn = sqlite3.connect(db_path)
@@ -200,6 +205,30 @@ def get_covered_call_settings() -> CoveredCallSettings:
     )
 
 
+def get_fundamentus_settings() -> FundamentusSettings:
+    conn = _connect()
+    try:
+        rows = conn.execute("SELECT key, value FROM settings").fetchall()
+    finally:
+        conn.close()
+
+    raw: Dict[str, str] = {str(r["key"]): str(r["value"]) for r in rows}
+
+    def _parse_float(name: str, default: float) -> float:
+        text = raw.get(name, "").strip()
+        if not text:
+            return default
+        text = text.replace("%", "").replace(",", ".")
+        try:
+            return float(text)
+        except ValueError:
+            return default
+
+    return FundamentusSettings(
+        target_yield_pct=_parse_float("fund_target_yield_pct", 8.0),
+    )
+
+
 def update_fee_settings(
     *,
     equity_fixed: float,
@@ -326,6 +355,26 @@ def update_covered_call_settings(
         conn.close()
 
 
+def update_fundamentus_settings(*, target_yield_pct: float) -> None:
+    conn = _connect()
+    try:
+        params = {
+            "fund_target_yield_pct": float(target_yield_pct),
+        }
+        for key, value in params.items():
+            conn.execute(
+                """
+                INSERT INTO settings (key, value)
+                VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (key, str(value)),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 __all__ = [
     "FeeSettings",
     "get_fee_settings",
@@ -339,4 +388,7 @@ __all__ = [
     "CoveredCallSettings",
     "get_covered_call_settings",
     "update_covered_call_settings",
+    "FundamentusSettings",
+    "get_fundamentus_settings",
+    "update_fundamentus_settings",
 ]

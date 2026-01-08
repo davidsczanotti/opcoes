@@ -13,10 +13,13 @@ from .utils import infer_option_type
 from .settings import (
     FeeSettings,
     StrategySettings,
+    FundamentusSettings,
     get_fee_settings,
     get_strategy_settings,
+    get_fundamentus_settings,
     update_fee_settings,
     update_strategy_settings,
+    update_fundamentus_settings,
 )
 from .strategies import get_cash_covered_put_context, get_covered_call_context, get_fundamentus_context, get_ranking_context
 from . import finance, darf
@@ -471,11 +474,17 @@ def create_app() -> Flask:
                 recurring_days=recur_days,
             )
 
+            fund_target_yield_pct = _parse_form_float(form.get("fund_target_yield_pct"))
+            update_fundamentus_settings(
+                target_yield_pct=fund_target_yield_pct or 8.0,
+            )
+
             return redirect(url_for("settings_view"))
 
         fees_cfg: FeeSettings = get_fee_settings()
         strat_cfg: StrategySettings = get_strategy_settings()
-        return render_template("settings.html", fees=fees_cfg, strat=strat_cfg)
+        fund_cfg: FundamentusSettings = get_fundamentus_settings()
+        return render_template("settings.html", fees=fees_cfg, strat=strat_cfg, fund=fund_cfg)
     @app.route("/positions")
     def positions() -> str:
         ticker_contains = (request.args.get("ticker") or "").strip().upper()

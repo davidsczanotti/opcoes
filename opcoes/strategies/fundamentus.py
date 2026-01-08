@@ -9,6 +9,7 @@ import yfinance as yf
 
 from ..fundamentus import fetch_approved_ranking, fetch_signals, fetch_snapshot, latest_snapshot_date
 from ..config import get_db_path
+from ..settings import get_fundamentus_settings
 
 
 _SECTOR_LABELS = {
@@ -61,6 +62,7 @@ _SECTOR_PALETTE = [
     "#bab0ab",
 ]
 _TICKER_META_CACHE: Dict[str, Dict[str, Optional[str]]] = {}
+_TARGET_YIELD_PCT = 8.0
 
 
 def _base_ticker(papel: str) -> str:
@@ -271,6 +273,28 @@ def _build_sector_breakdown(rows: List[Dict[str, Any]]) -> List[Dict[str, object
     return breakdown
 
 
+def _attach_price_ceiling(
+    rows: List[Dict[str, Any]],
+    *,
+    target_yield_pct: float = _TARGET_YIELD_PCT,
+) -> None:
+    if not rows or target_yield_pct <= 0:
+        return
+    for row in rows:
+        dy = row.get("div_yield")
+        price = row.get("cotacao")
+        try:
+            dy_val = float(dy) if dy is not None else None
+            price_val = float(price) if price is not None else None
+        except (TypeError, ValueError):
+            row["preco_teto"] = None
+            continue
+        if not dy_val or not price_val:
+            row["preco_teto"] = None
+            continue
+        row["preco_teto"] = price_val * (dy_val / target_yield_pct)
+
+
 def _get_optional_int_arg(args: Mapping[str, Any], name: str) -> Optional[int]:
     try:
         raw = args.get(name)
@@ -331,10 +355,14 @@ def get_fundamentus_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         status_filter, "Todas"
     )
 
+    fund_cfg = get_fundamentus_settings()
+    target_yield_pct = fund_cfg.target_yield_pct or _TARGET_YIELD_PCT
+
     option_underlyings = _fetch_option_underlyings()
     filtered_rows = _dedupe_by_option_listing(filtered_rows, option_underlyings)
     if filtered_rows:
         _attach_sector_info(filtered_rows)
+        _attach_price_ceiling(filtered_rows, target_yield_pct=target_yield_pct)
     sector_breakdown = _build_sector_breakdown(filtered_rows) if filtered_rows else []
 
     window_days = max(1, _get_int_arg(args, "window_days", 30))
@@ -357,6 +385,7 @@ def get_fundamentus_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         "rejected_count": rejected_count,
         "status_filter": status_filter,
         "status_label": status_label,
+        "target_yield_pct": target_yield_pct,
         "sector_breakdown": sector_breakdown,
         "ranking_total": ranking_total["rows"],
         "ranking_window": ranking_window["rows"],
