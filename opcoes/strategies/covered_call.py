@@ -4,9 +4,8 @@ from typing import Any, Dict, List, Mapping, Tuple
 
 from ..portfolio import list_positions
 from ..snapshot_repository import fetch_latest_underlying_options, fetch_latest_underlying_quote
-from ..scraper.storage import _parse_ptbr_number
 from ..settings import get_covered_call_settings, update_covered_call_settings
-from ..utils import infer_option_type
+from ..utils import infer_option_type, parse_ptbr_number
 
 
 def _get_int_arg(args: Mapping[str, Any], name: str, default: int) -> int:
@@ -220,7 +219,7 @@ def _call_cashflow_summaries(
 
 def _parse_float(value) -> float | None:
     try:
-        return float(_parse_ptbr_number(value))
+        return float(parse_ptbr_number(value))
     except Exception:
         return None
 

@@ -44,4 +44,42 @@ def format_decimal(value: Optional[float], decimals: int = 2, signed: bool = Fal
     return txt
 
 
-__all__ = ["infer_option_type", "format_decimal", "CALL_SERIES", "PUT_SERIES"]
+def parse_ptbr_number(value: object) -> Optional[float]:
+    """Converte strings com vírgula/porcentagem em float."""
+
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        try:
+            return float(value)
+        except Exception:  # noqa: BLE001
+            return None
+    text = str(value).strip()
+    if not text:
+        return None
+    cleaned = (
+        text.replace("\xa0", "")
+        .replace("\u2212", "-")
+        .replace("−", "-")
+        .replace("%", "")
+        .replace("+", "")
+        .replace(" ", "")
+    )
+    if not cleaned or cleaned == "-":
+        return None
+    cleaned = cleaned.replace('"', "").replace("'", "")
+    has_comma = "," in cleaned
+    has_dot = "." in cleaned
+    if has_comma and has_dot:
+        cleaned = cleaned.replace(".", "").replace(",", ".")
+    elif has_comma:
+        cleaned = cleaned.replace(",", ".")
+    elif has_dot and re.fullmatch(r"\d{1,3}(?:\.\d{3})+", cleaned):
+        cleaned = cleaned.replace(".", "")
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
+__all__ = ["infer_option_type", "format_decimal", "parse_ptbr_number", "CALL_SERIES", "PUT_SERIES"]

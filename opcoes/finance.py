@@ -33,11 +33,20 @@ def _get_conn() -> sqlite3.Connection:
     db_path = get_db_path()
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
-    _ensure_table(conn)
+    _ensure_table(conn, commit=True)
     return conn
 
 
-def _ensure_table(conn: sqlite3.Connection) -> None:
+def _resolve_conn(conn: Optional[sqlite3.Connection]) -> tuple[sqlite3.Connection, bool]:
+    if conn is None:
+        return _get_conn(), True
+    _ensure_table(conn, commit=not conn.in_transaction)
+    if conn.row_factory is None:
+        conn.row_factory = sqlite3.Row
+    return conn, False
+
+
+def _ensure_table(conn: sqlite3.Connection, *, commit: bool) -> None:
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS ledger (
@@ -58,7 +67,8 @@ def _ensure_table(conn: sqlite3.Connection) -> None:
     }
     if "is_simulated" not in existing:
         conn.execute('ALTER TABLE ledger ADD COLUMN "is_simulated" INTEGER DEFAULT 0')
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 def add_transaction(
@@ -68,21 +78,24 @@ def add_transaction(
     description: str = None,
     position_id: int = None,
     is_simulated: bool = False,
+    conn: Optional[sqlite3.Connection] = None,
 ) -> int:
     """Registra uma transação financeira."""
-    conn = _get_conn()
+    db, owns_conn = _resolve_conn(conn)
     try:
-        cur = conn.execute(
+        cur = db.execute(
             """
             INSERT INTO ledger (date, type, amount, description, position_id, is_simulated)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
             (date, type.value, amount, description, position_id, 1 if is_simulated else 0),
         )
-        conn.commit()
+        if owns_conn:
+            db.commit()
         return cur.lastrowid
     finally:
-        conn.close()
+        if owns_conn:
+            db.close()
 
 
 def get_balance(mode: str = "all") -> float:

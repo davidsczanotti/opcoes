@@ -128,40 +128,61 @@ def calculate_ranking_strategy(
     Filters opportunities, processes alerts, and calculates totals.
     """
     # Filtering Logic
+    opportunities = list(data.opportunities)
+    theoretical_opportunities = list(data.theoretical_opportunities)
+    rational_opportunities = list(data.rational_opportunities)
+    lottery_opportunities = list(data.lottery_opportunities)
+    recurring_opportunities = list(data.recurring_opportunities)
+
     if option_type_filter:
-        data.opportunities = _filter_by_type(data.opportunities, option_type_filter)
-        data.theoretical_opportunities = _filter_by_type(data.theoretical_opportunities, option_type_filter)
-        data.rational_opportunities = _filter_by_type(data.rational_opportunities, option_type_filter)
-        data.lottery_opportunities = _filter_by_type(data.lottery_opportunities, option_type_filter)
-        data.recurring_opportunities = _filter_by_type(data.recurring_opportunities, option_type_filter)
+        opportunities = _filter_by_type(opportunities, option_type_filter)
+        theoretical_opportunities = _filter_by_type(theoretical_opportunities, option_type_filter)
+        rational_opportunities = _filter_by_type(rational_opportunities, option_type_filter)
+        lottery_opportunities = _filter_by_type(lottery_opportunities, option_type_filter)
+        recurring_opportunities = _filter_by_type(recurring_opportunities, option_type_filter)
 
     if underlying_filter:
-        data.opportunities = _filter_by_underlying(data.opportunities, underlying_filter)
-        data.theoretical_opportunities = _filter_by_underlying(data.theoretical_opportunities, underlying_filter)
-        data.rational_opportunities = _filter_by_underlying(data.rational_opportunities, underlying_filter)
-        data.lottery_opportunities = _filter_by_underlying(data.lottery_opportunities, underlying_filter)
-        data.recurring_opportunities = _filter_by_underlying(data.recurring_opportunities, underlying_filter)
+        opportunities = _filter_by_underlying(opportunities, underlying_filter)
+        theoretical_opportunities = _filter_by_underlying(theoretical_opportunities, underlying_filter)
+        rational_opportunities = _filter_by_underlying(rational_opportunities, underlying_filter)
+        lottery_opportunities = _filter_by_underlying(lottery_opportunities, underlying_filter)
+        recurring_opportunities = _filter_by_underlying(recurring_opportunities, underlying_filter)
+
+    filtered_data = ReportData(
+        snapshot_date=data.snapshot_date,
+        opportunities=opportunities,
+        theoretical_opportunities=theoretical_opportunities,
+        rational_opportunities=rational_opportunities,
+        lottery_opportunities=lottery_opportunities,
+        positions=data.positions,
+        alerts=data.alerts,
+        recurring_opportunities=recurring_opportunities,
+        recurring_window_start=data.recurring_window_start,
+        recurring_window_days=data.recurring_window_days,
+        recurring_snapshot_days=data.recurring_snapshot_days,
+        hv_window_days=data.hv_window_days,
+    )
 
     # Alert Processing
     alerts_map: Dict[int, List[str]] = {}
-    for alert in data.alerts:
+    for alert in filtered_data.alerts:
         pos = alert.get("position")
         if not pos:
             continue
         alerts_map[pos.get("id")] = alert.get("reasons", [])
 
     # Positions & Totals
-    positions_real = [p for p in data.positions if not p.get("is_simulated")]
-    positions_simulated = [p for p in data.positions if p.get("is_simulated")]
+    positions_real = [p for p in filtered_data.positions if not p.get("is_simulated")]
+    positions_simulated = [p for p in filtered_data.positions if p.get("is_simulated")]
     totals_real = _compute_totals(positions_real)
     totals_simulated = _compute_totals(positions_simulated)
     
     # Segmentation
-    all_opps = list(data.opportunities) + list(data.theoretical_opportunities)
+    all_opps = list(filtered_data.opportunities) + list(filtered_data.theoretical_opportunities)
     segments = _segment_opportunities(all_opps)
 
     return {
-        "data": data,
+        "data": filtered_data,
         "min_score": min_score,
         "limit": limit,
         "recurring_days": recurring_days,

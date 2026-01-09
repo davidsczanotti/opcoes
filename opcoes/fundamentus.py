@@ -10,7 +10,8 @@ from urllib import parse, request
 import http.cookiejar
 
 from .config import get_db_path
-from .scraper.storage import _ensure_parent, _parse_ptbr_number
+from .scraper.storage import _ensure_parent
+from .utils import parse_ptbr_number
 
 SEARCH_URL = "https://www.fundamentus.com.br/buscaavancada.php"
 RESULT_URL = "https://www.fundamentus.com.br/resultado.php"
@@ -131,7 +132,7 @@ def normalize_rows(rows: Sequence[Dict[str, str]]) -> List[Dict[str, object]]:
             continue
         entry: Dict[str, object] = {"papel": papel}
         for field in NUMERIC_FIELDS:
-            entry[field] = _parse_ptbr_number(row.get(field))
+            entry[field] = parse_ptbr_number(row.get(field))
         normalized.append(entry)
     return normalized
 

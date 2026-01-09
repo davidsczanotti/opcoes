@@ -4,7 +4,8 @@ import sqlite3
 from typing import Iterable, List, Optional
 
 from .config import get_db_path
-from .scraper.storage import _ensure_parent, _parse_ptbr_number
+from .scraper.storage import _ensure_parent
+from .utils import parse_ptbr_number
 
 
 def _connect() -> sqlite3.Connection:
@@ -12,11 +13,20 @@ def _connect() -> sqlite3.Connection:
     _ensure_parent(db_path)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
-    _ensure_tables(conn)
+    _ensure_tables(conn, commit=True)
     return conn
 
 
-def _ensure_tables(conn: sqlite3.Connection) -> None:
+def _resolve_conn(conn: Optional[sqlite3.Connection]) -> tuple[sqlite3.Connection, bool]:
+    if conn is None:
+        return _connect(), True
+    _ensure_tables(conn, commit=not conn.in_transaction)
+    if conn.row_factory is None:
+        conn.row_factory = sqlite3.Row
+    return conn, False
+
+
+def _ensure_tables(conn: sqlite3.Connection, *, commit: bool) -> None:
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS positions (
@@ -42,7 +52,8 @@ def _ensure_tables(conn: sqlite3.Connection) -> None:
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_positions_ticker ON positions (ticker)")
     _ensure_position_columns(conn)
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 def _ensure_position_columns(conn: sqlite3.Connection) -> None:
@@ -65,7 +76,6 @@ def _ensure_position_columns(conn: sqlite3.Connection) -> None:
     for col, col_type in columns.items():
         if col not in existing:
             conn.execute(f'ALTER TABLE positions ADD COLUMN "{col}" {col_type}')
-    conn.commit()
 
 
 def _normalize_ticker(value: str) -> str:
@@ -90,9 +100,10 @@ def add_position(
     is_simulated: bool = False,
     parent_position_id: Optional[int] = None,
     strategy_tag: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
 ) -> int:
-    conn = _connect()
-    cursor = conn.cursor()
+    db, owns_conn = _resolve_conn(conn)
+    cursor = db.cursor()
     cursor.execute(
         """
         INSERT INTO positions (
@@ -134,9 +145,11 @@ def add_position(
             strategy_tag or None,
         ),
     )
-    conn.commit()
+    if owns_conn:
+        db.commit()
     pos_id = cursor.lastrowid
-    conn.close()
+    if owns_conn:
+        db.close()
     return int(pos_id)
 
 
@@ -146,9 +159,10 @@ def close_position(
     exit_date: str,
     exit_price: float,
     exit_reason: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
 ) -> None:
-    conn = _connect()
-    cur = conn.cursor()
+    db, owns_conn = _resolve_conn(conn)
+    cur = db.cursor()
     cur.execute(
         """
         UPDATE positions
@@ -161,10 +175,12 @@ def close_position(
         (exit_date, float(exit_price), exit_reason, int(position_id)),
     )
     if cur.rowcount == 0:
-        conn.close()
+        if owns_conn:
+            db.close()
         raise ValueError(f"Posição {position_id} não encontrada ou já fechada.")
-    conn.commit()
-    conn.close()
+    if owns_conn:
+        db.commit()
+        db.close()
 
 
 def update_position(
@@ -187,6 +203,7 @@ def update_position(
     is_simulated: Optional[bool] = None,
     parent_position_id: Optional[int] = None,
     strategy_tag: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
 ) -> None:
     fields = []
     params = []
@@ -245,26 +262,29 @@ def update_position(
         return
 
     params.append(int(position_id))
-    conn = _connect()
-    cur = conn.cursor()
+    db, owns_conn = _resolve_conn(conn)
+    cur = db.cursor()
     cur.execute(f"UPDATE positions SET {', '.join(fields)} WHERE id = ?", params)
     if cur.rowcount == 0:
-        conn.close()
+        if owns_conn:
+            db.close()
         raise ValueError(f"Posição {position_id} não encontrada.")
-    conn.commit()
-    conn.close()
+    if owns_conn:
+        db.commit()
+        db.close()
 
 
-def delete_position(*, position_id: int) -> None:
-    conn = _connect()
-    cur = conn.cursor()
+def delete_position(*, position_id: int, conn: Optional[sqlite3.Connection] = None) -> None:
+    db, owns_conn = _resolve_conn(conn)
+    cur = db.cursor()
     cur.execute("DELETE FROM positions WHERE id = ?", (int(position_id),))
-    conn.commit()
-    conn.close()
+    if owns_conn:
+        db.commit()
+        db.close()
 
 
-def get_position(position_id: int) -> Optional[dict]:
-    conn = _connect()
+def get_position(position_id: int, *, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+    db, owns_conn = _resolve_conn(conn)
     try:
         query = """
             SELECT
@@ -292,10 +312,11 @@ def get_position(position_id: int) -> Optional[dict]:
             ) AS snap ON snap.ticker = p.ticker
             WHERE p.id = ?
         """
-        row = conn.execute(query, (int(position_id),)).fetchone()
+        row = db.execute(query, (int(position_id),)).fetchone()
         return _row_to_dict(row) if row else None
     finally:
-        conn.close()
+        if owns_conn:
+            db.close()
 
 
 def list_positions(
@@ -308,8 +329,9 @@ def list_positions(
     strategy_tag: Optional[str] = None,
     trade_type: Optional[str] = None,
     is_simulated: Optional[bool] = None,
+    conn: Optional[sqlite3.Connection] = None,
 ) -> List[dict]:
-    conn = _connect()
+    db, owns_conn = _resolve_conn(conn)
     where: List[str] = []
     params: List[object] = []
     if only_closed:
@@ -365,14 +387,15 @@ def list_positions(
         {where_clause}
         ORDER BY p.trade_date DESC, p.id DESC
     """
-    rows = conn.execute(query, params).fetchall()
-    conn.close()
+    rows = db.execute(query, params).fetchall()
+    if owns_conn:
+        db.close()
     return [_row_to_dict(row) for row in rows]
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
     def parse_decimal(value: object) -> Optional[float]:
-        parsed = _parse_ptbr_number(value)
+        parsed = parse_ptbr_number(value)
         if parsed is None:
             return None
         try:

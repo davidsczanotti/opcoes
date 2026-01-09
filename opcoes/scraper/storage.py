@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import csv
-import re
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set, Tuple
+
+from ..utils import parse_ptbr_number
 
 
 CSV_DELIMITER = ";"
@@ -171,41 +172,7 @@ def _parse_int(value: object) -> Optional[int]:
 
 
 def _parse_ptbr_number(value: object) -> Optional[float]:
-    """Converte strings com vírgula/porcentagem em float."""
-
-    if value is None:
-        return None
-    if isinstance(value, (int, float)):
-        try:
-            return float(value)
-        except Exception:  # noqa: BLE001
-            return None
-    text = str(value).strip()
-    if not text:
-        return None
-    cleaned = (
-        text.replace("\xa0", "")
-        .replace("\u2212", "-")
-        .replace("−", "-")
-        .replace("%", "")
-        .replace("+", "")
-        .replace(" ", "")
-    )
-    if not cleaned or cleaned == "-":
-        return None
-    cleaned = cleaned.replace('"', "").replace("'", "")
-    has_comma = "," in cleaned
-    has_dot = "." in cleaned
-    if has_comma and has_dot:
-        cleaned = cleaned.replace(".", "").replace(",", ".")
-    elif has_comma:
-        cleaned = cleaned.replace(",", ".")
-    elif has_dot and re.fullmatch(r"\d{1,3}(?:\.\d{3})+", cleaned):
-        cleaned = cleaned.replace(".", "")
-    try:
-        return float(cleaned)
-    except ValueError:
-        return None
+    return parse_ptbr_number(value)
 
 
 def _format_decimal_ptbr(value: float, decimals: int) -> str:

@@ -4,8 +4,7 @@ import datetime
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from ..snapshot_repository import fetch_latest_underlying_options, fetch_latest_underlying_quote
-from ..scraper.storage import _parse_ptbr_number
-from ..utils import infer_option_type
+from ..utils import infer_option_type, parse_ptbr_number
 from .. import finance
 from ..portfolio import list_positions
 from ..settings import get_cash_put_settings, update_cash_put_settings
@@ -29,7 +28,7 @@ def _get_float_arg(args: Mapping[str, Any], name: str, default: float) -> float:
 
 def _parse_float(value: Any) -> Optional[float]:
     try:
-        parsed = _parse_ptbr_number(value)
+        parsed = parse_ptbr_number(value)
     except Exception:
         return None
     if parsed is None:

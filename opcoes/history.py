@@ -7,8 +7,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from .config import get_db_path
-from .scraper.storage import _ensure_parent, _parse_ptbr_number
-from .utils import infer_option_type
+from .scraper.storage import _ensure_parent
+from .utils import infer_option_type, parse_ptbr_number
 
 
 def _connect(db_path: Optional[Path] = None) -> sqlite3.Connection:
@@ -83,7 +83,7 @@ def _ensure_tables(conn: sqlite3.Connection) -> None:
 
 
 def _parse_float(value: Any) -> Optional[float]:
-    parsed = _parse_ptbr_number(value)
+    parsed = parse_ptbr_number(value)
     if parsed is None:
         return None
     try:
