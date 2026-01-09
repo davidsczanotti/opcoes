@@ -171,7 +171,7 @@
                 </div>
                 <div class="col-md-4">
                   <label class="form-label small">Estratégia</label>
-                  <select name="strategy_tag" class="form-select form-select-sm">
+                  <select name="strategy_tag" class="form-select form-select-sm" id="strategyTagInput">
                     <option value="">-</option>
                     <option value="cash_put">Cash-Covered Put</option>
                     <option value="covered_call">Covered Call</option>
@@ -329,8 +329,23 @@
                       </div>
                     </td>
                     <td style="min-width: 200px;">
-                      <div class="d-flex gap-1 mb-1">
+                      <div class="d-flex flex-wrap gap-1 mb-1">
                         <button class="btn btn-success btn-sm" type="submit">Salvar</button>
+                        {% if pos.underlying and pos.ticker and pos.ticker != pos.underlying %}
+                          {% if pos.premium_recorded %}
+                            <span class="badge text-bg-secondary align-self-center">Prêmio ok</span>
+                          {% else %}
+                            <button
+                              class="btn btn-outline-primary btn-sm"
+                              type="submit"
+                              formaction="/positions/register-premium/{{ pos.id }}"
+                              formmethod="post"
+                              onclick="return confirm('Registrar prêmio no caixa para {{ pos.ticker }}? Isso também lança a provisão DARF.');"
+                            >
+                              Registrar prêmio
+                            </button>
+                          {% endif %}
+                        {% endif %}
                       </div>
                       <div class="mb-1">
                         <small>Saída total</small>
@@ -366,6 +381,17 @@
       const dateInput = document.querySelector('#modalAddPosition input[name="trade_date"]');
       if (dateInput) {
           dateInput.value = new Date().toISOString().split('T')[0];
+      }
+      const strategySelect = document.querySelector('#modalAddPosition select[name="strategy_tag"]');
+      const recordPremiumInput = document.querySelector('#recordPremium');
+      if (strategySelect && recordPremiumInput) {
+          const syncPremiumCheckbox = () => {
+              if (strategySelect.value === "cash_put") {
+                  recordPremiumInput.checked = true;
+              }
+          };
+          syncPremiumCheckbox();
+          strategySelect.addEventListener('change', syncPremiumCheckbox);
       }
     </script>
   </body>

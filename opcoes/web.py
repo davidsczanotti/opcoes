@@ -380,6 +380,11 @@ def create_app() -> Flask:
             trade_type=trade_type or None,
             is_simulated=is_simulated,
         )
+        position_ids = [int(p["id"]) for p in positions if p.get("id") is not None]
+        premium_ids = finance.get_premium_position_ids(position_ids)
+        for pos in positions:
+            pos_id = pos.get("id")
+            pos["premium_recorded"] = bool(pos_id and int(pos_id) in premium_ids)
         return render_template(
             "positions.html",
             positions=positions,
@@ -458,6 +463,73 @@ def create_app() -> Flask:
                         )
 
         return redirect(_safe_next_url(form.get("next")) or url_for("positions"))
+
+    @app.post("/positions/register-premium/<int:position_id>")
+    def register_position_premium(position_id: int):
+        next_url = _safe_next_url(request.form.get("next")) or url_for("positions")
+        pos = get_position(position_id)
+        if not pos:
+            return redirect(next_url)
+
+        ticker = (pos.get("ticker") or "").strip()
+        underlying = (pos.get("underlying") or "").strip()
+        if not underlying:
+            underlying = _lookup_underlying_from_snapshot(ticker) or ""
+        if not ticker or not underlying or ticker.upper() == underlying.upper():
+            return redirect(next_url)
+
+        try:
+            entry_price = float(pos.get("entry_price") or 0.0)
+        except (TypeError, ValueError):
+            entry_price = 0.0
+        try:
+            qty = int(pos.get("qty") or 0)
+        except (TypeError, ValueError):
+            qty = 0
+        if entry_price <= 0 or qty <= 0:
+            return redirect(next_url)
+
+        if finance.has_position_premium(position_id):
+            return redirect(next_url)
+
+        try:
+            fees = float(pos.get("fees") or 0.0)
+        except (TypeError, ValueError):
+            fees = 0.0
+
+        total_premium = (entry_price * qty) - fees
+        if total_premium <= 0:
+            return redirect(next_url)
+
+        trade_date = pos.get("trade_date") or datetime.date.today().isoformat()
+        is_simulated = bool(pos.get("is_simulated") or 0)
+
+        finance.add_transaction(
+            date=trade_date,
+            type=finance.TransactionType.PREMIUM,
+            amount=total_premium,
+            description=f"Prêmio {ticker} ({qty}x)",
+            position_id=position_id,
+            is_simulated=is_simulated,
+        )
+
+        reserve_darf = request.form.get("reserve_darf", "1") == "1"
+        if reserve_darf:
+            trade_type = (pos.get("trade_type") or "swing").strip().lower()
+            aliquota_opts = 0.20 if "day" in trade_type else 0.15
+            base_ir = max(0.0, float(total_premium))
+            darf = base_ir * aliquota_opts
+            if darf > 0:
+                finance.add_transaction(
+                    date=trade_date,
+                    type=finance.TransactionType.DARF,
+                    amount=-darf,
+                    description=f"Provisão DARF {ticker} ({int(aliquota_opts*100)}%)",
+                    position_id=position_id,
+                    is_simulated=is_simulated,
+                )
+
+        return redirect(next_url)
 
     @app.post("/positions/update/<int:position_id>")
     def update_position_view(position_id: int):

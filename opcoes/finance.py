@@ -182,6 +182,35 @@ def get_transactions(limit: int = 50) -> List[Transaction]:
         conn.close()
 
 
+def get_premium_position_ids(position_ids: Optional[List[int]] = None) -> set[int]:
+    if position_ids is not None and not position_ids:
+        return set()
+    conn = _get_conn()
+    try:
+        params: list[object] = [TransactionType.PREMIUM.value]
+        query = "SELECT DISTINCT position_id FROM ledger WHERE type = ? AND position_id IS NOT NULL"
+        if position_ids:
+            placeholders = ",".join("?" for _ in position_ids)
+            query += f" AND position_id IN ({placeholders})"
+            params.extend([int(pid) for pid in position_ids])
+        rows = conn.execute(query, params).fetchall()
+        return {int(r["position_id"]) for r in rows if r["position_id"] is not None}
+    finally:
+        conn.close()
+
+
+def has_position_premium(position_id: int) -> bool:
+    conn = _get_conn()
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM ledger WHERE type = ? AND position_id = ? LIMIT 1",
+            (TransactionType.PREMIUM.value, int(position_id)),
+        ).fetchone()
+        return row is not None
+    finally:
+        conn.close()
+
+
 def update_transaction(
     tx_id: int,
     *,

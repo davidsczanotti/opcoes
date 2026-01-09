@@ -47,6 +47,18 @@ def _premium_from_row(row: Mapping[str, Any]) -> Tuple[Optional[float], str]:
     return None, ""
 
 
+def _is_put_option_position(pos: Mapping[str, Any]) -> bool:
+    ticker = (pos.get("ticker") or "").strip().upper()
+    if not ticker:
+        return False
+    if infer_option_type(ticker) != "PUT":
+        return False
+    underlying = (pos.get("underlying") or "").strip().upper()
+    if underlying and ticker != underlying:
+        return True
+    return (pos.get("strategy_tag") or "").strip().lower() == "cash_put"
+
+
 def _calculate_portfolio_metrics(
     *,
     spot: Optional[float],
@@ -100,6 +112,45 @@ def _calculate_portfolio_metrics(
         "max_shares": max_shares,
         "max_lots": max_lots,
     }
+
+
+def _aggregate_put_premiums_by_month(
+    positions: List[Dict[str, Any]],
+    *,
+    is_simulated: bool,
+) -> List[Dict[str, float]]:
+    premiums_agg: Dict[str, float] = {}
+
+    for pos in positions:
+        if bool(pos.get("is_simulated")) != is_simulated:
+            continue
+        if not _is_put_option_position(pos):
+            continue
+
+        entry = pos.get("entry_price") or 0.0
+        qty = pos.get("qty") or 0
+        fees = pos.get("fees") or 0.0
+        t_date = pos.get("trade_date")
+        if not t_date or not entry or not qty:
+            continue
+
+        try:
+            dt = datetime.date.fromisoformat(t_date)
+        except Exception:
+            continue
+
+        trade_type = (pos.get("trade_type") or "swing").strip().lower()
+        aliquota_opts = 0.20 if "day" in trade_type else 0.15
+        premium_bruto = (entry * qty)
+        base_premio = max(0.0, float(premium_bruto - fees))
+        ir_premio = base_premio * aliquota_opts
+        val = float(premium_bruto - fees - ir_premio)
+
+        m_key = dt.strftime("%Y-%m")
+        premiums_agg[m_key] = premiums_agg.get(m_key, 0.0) + val
+
+    results = [{"month": m, "total": premiums_agg[m]} for m in sorted(premiums_agg.keys(), reverse=True)]
+    return results[::-1]
 
 
 def _build_put_suggestions(
@@ -205,7 +256,10 @@ def calculate_cash_covered_put_strategy(
     """
     puts_real: List[Dict[str, Any]] = []
     puts_simulated: List[Dict[str, Any]] = []
-    sim_premiums_agg: Dict[str, float] = {}
+    simulated_monthly_premiums_fallback = _aggregate_put_premiums_by_month(
+        positions_open,
+        is_simulated=True,
+    )
 
     for pos in positions_open:
         ticker = (pos.get("ticker") or "").upper()
@@ -250,26 +304,8 @@ def calculate_cash_covered_put_strategy(
 
         if pos_data.get("is_simulated"):
             puts_simulated.append(pos_data)
-            t_date = pos_data.get("trade_date")
-            if t_date:
-                try:
-                    dt = datetime.date.fromisoformat(t_date)
-                    m_key = dt.strftime("%Y-%m")
-                    trade_type = (pos_data.get("trade_type") or "swing").strip().lower()
-                    aliquota_opts = 0.20 if "day" in trade_type else 0.15
-                    premium_bruto = (entry * qty)
-                    base_premio = max(0.0, float(premium_bruto - fees))
-                    ir_premio = base_premio * aliquota_opts
-                    val = float(premium_bruto - fees - ir_premio)
-                    sim_premiums_agg[m_key] = sim_premiums_agg.get(m_key, 0.0) + val
-                except ValueError:
-                    pass
         else:
             puts_real.append(pos_data)
-
-    simulated_monthly_premiums_fallback = []
-    for m in sorted(sim_premiums_agg.keys(), reverse=True):
-        simulated_monthly_premiums_fallback.append({"month": m, "total": sim_premiums_agg[m]})
 
     suggestions = _build_put_suggestions(
         options_rows,
@@ -356,6 +392,45 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         cash_mode=mode,
         total_balance=total_balance,
     )
+    puts_all = [pos for pos in positions_open if _is_put_option_position(pos)]
+    puts_real_all = [pos for pos in puts_all if not bool(pos.get("is_simulated"))]
+    puts_simulated_all = [pos for pos in puts_all if bool(pos.get("is_simulated"))]
+
+    spot_price: Optional[float] = None
+    if quote and quote.get("price") is not None:
+        try:
+            spot_price = float(quote["price"])
+        except (TypeError, ValueError):
+            spot_price = None
+
+    finance_metrics = _calculate_portfolio_metrics(
+        spot=spot_price,
+        contract_size=contract_size,
+        cash_mode=mode,
+        puts_real=puts_real_all,
+        puts_simulated=puts_simulated_all,
+        total_balance=total_balance,
+    )
+    balance_real = finance.get_balance(mode="real")
+    balance_simulated = finance.get_balance(mode="simulated")
+    finance_breakdown = {
+        "real": _calculate_portfolio_metrics(
+            spot=spot_price,
+            contract_size=contract_size,
+            cash_mode="real",
+            puts_real=puts_real_all,
+            puts_simulated=puts_simulated_all,
+            total_balance=balance_real,
+        ),
+        "simulated": _calculate_portfolio_metrics(
+            spot=spot_price,
+            contract_size=contract_size,
+            cash_mode="simulated",
+            puts_real=puts_real_all,
+            puts_simulated=puts_simulated_all,
+            total_balance=balance_simulated,
+        ),
+    }
     # Prêmios líquidos por mês (PREMIUM - DARF) via caixa (ledger).
     monthly_premiums = finance.get_monthly_premiums(include_darf=True, is_simulated=False)
     simulated_monthly_premiums = finance.get_monthly_premiums(include_darf=True, is_simulated=True) or ctx.get("simulated_monthly_premiums_fallback", [])
@@ -363,6 +438,8 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
 
     return {
         **ctx,
+        "finance": finance_metrics,
+        "finance_breakdown": finance_breakdown,
         "simulated_monthly_premiums": simulated_monthly_premiums,
         "filters": {
             "min_yield_pct": min_yield_pct,
