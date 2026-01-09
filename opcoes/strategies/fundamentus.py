@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+import datetime as dt
 import re
 import sqlite3
 from typing import Any, Dict, List, Mapping, Optional, Sequence
@@ -10,6 +11,7 @@ import yfinance as yf
 from ..fundamentus import fetch_approved_ranking, fetch_signals, fetch_snapshot, latest_snapshot_date
 from ..config import get_db_path
 from ..settings import get_fundamentus_settings
+from ..utils import parse_ptbr_number
 
 
 _SECTOR_LABELS = {
@@ -63,6 +65,160 @@ _SECTOR_PALETTE = [
 ]
 _TICKER_META_CACHE: Dict[str, Dict[str, Optional[str]]] = {}
 _TARGET_YIELD_PCT = 8.0
+
+def _parse_date(value: Optional[str]) -> Optional[dt.date]:
+    if not value:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return dt.date.fromisoformat(text)
+    except ValueError:
+        pass
+    try:
+        return dt.datetime.strptime(text, "%d/%m/%Y").date()
+    except ValueError:
+        return None
+
+
+def _next_month_third_friday(base_date: dt.date) -> dt.date:
+    year = base_date.year + (1 if base_date.month == 12 else 0)
+    month = 1 if base_date.month == 12 else base_date.month + 1
+    first = dt.date(year, month, 1)
+    first_friday = first + dt.timedelta(days=(4 - first.weekday()) % 7)
+    return first_friday + dt.timedelta(days=14)
+
+
+def _latest_option_snapshot_date() -> Optional[str]:
+    conn = sqlite3.connect(get_db_path())
+    try:
+        row = conn.execute("SELECT MAX(snapshot_date) AS d FROM option_snapshots").fetchone()
+        return row[0] if row else None
+    except sqlite3.Error:
+        return None
+    finally:
+        conn.close()
+
+
+def _fetch_underlying_prices(snapshot_date: str, underlyings: Sequence[str]) -> Dict[str, float]:
+    if not snapshot_date or not underlyings:
+        return {}
+    conn = sqlite3.connect(get_db_path())
+    try:
+        conn.row_factory = sqlite3.Row
+        placeholders = ",".join(["?"] * len(underlyings))
+        params = [snapshot_date] + [u.upper() for u in underlyings]
+        query = """
+            SELECT underlying, price
+            FROM underlying_snapshots
+            WHERE snapshot_date = ?
+              AND UPPER(underlying) IN ({placeholders})
+        """.format(placeholders=placeholders)
+        rows = conn.execute(query, params).fetchall()
+        prices: Dict[str, float] = {}
+        for row in rows:
+            price = row["price"]
+            if price is None:
+                continue
+            prices[str(row["underlying"]).upper()] = float(price)
+        return prices
+    except sqlite3.Error:
+        return {}
+    finally:
+        conn.close()
+
+
+def _fetch_put_rows(snapshot_date: str, underlyings: Sequence[str]) -> List[Dict[str, Any]]:
+    if not snapshot_date or not underlyings:
+        return []
+    conn = sqlite3.connect(get_db_path())
+    try:
+        conn.row_factory = sqlite3.Row
+        placeholders = ",".join(["?"] * len(underlyings))
+        params = [snapshot_date] + [u.upper() for u in underlyings]
+        query = """
+            SELECT underlying, ticker, vencimento, strike, ultimo, best_bid, mod
+            FROM option_snapshots
+            WHERE snapshot_date = ?
+              AND UPPER(underlying) IN ({placeholders})
+              AND UPPER(option_type) LIKE 'PUT%'
+        """.format(placeholders=placeholders)
+        rows = conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
+    except sqlite3.Error:
+        return []
+    finally:
+        conn.close()
+
+
+def _build_put_opportunities(
+    *,
+    fundamentals: Sequence[Mapping[str, Any]],
+    option_rows: Sequence[Mapping[str, Any]],
+    target_vencimento: Optional[dt.date],
+    distance_limit_pct: float,
+    price_map: Mapping[str, float],
+) -> List[Dict[str, Any]]:
+    if not target_vencimento:
+        return []
+    spot_by_ticker: Dict[str, float] = {}
+    for row in fundamentals:
+        papel = str(row.get("papel") or "").strip().upper()
+        if not papel:
+            continue
+        cotacao = parse_ptbr_number(row.get("cotacao"))
+        if cotacao is None:
+            continue
+        spot_by_ticker[papel] = float(cotacao)
+
+    opportunities: List[Dict[str, Any]] = []
+    for opt in option_rows:
+        underlying = str(opt.get("underlying") or "").strip().upper()
+        if not underlying:
+            continue
+        venc = _parse_date(str(opt.get("vencimento") or "").strip())
+        if venc != target_vencimento:
+            continue
+        spot = spot_by_ticker.get(underlying)
+        if spot is None:
+            spot = price_map.get(underlying)
+        if spot is None or spot <= 0:
+            continue
+        strike = parse_ptbr_number(opt.get("strike"))
+        if strike is None or strike <= 0:
+            continue
+        if strike >= spot:
+            continue
+        distance_pct = (spot - strike) / spot * 100.0
+        if distance_pct <= 0 or distance_pct > distance_limit_pct:
+            continue
+        premium = parse_ptbr_number(opt.get("ultimo"))
+        if premium is None or premium <= 0:
+            premium = parse_ptbr_number(opt.get("best_bid"))
+        if premium is None or premium <= 0:
+            continue
+        premium_pct = (premium / strike) * 100.0
+        opportunities.append(
+            {
+                "papel": underlying,
+                "cotacao": spot,
+                "contrato": opt.get("ticker"),
+                "strike": strike,
+                "ultimo": premium,
+                "premio_pct": premium_pct,
+                "distancia_strike_pct": distance_pct,
+            }
+        )
+
+    opportunities.sort(
+        key=lambda row: (
+            row.get("papel") or "",
+            -(row.get("premio_pct") or 0.0),
+            row.get("strike") or 0.0,
+        )
+    )
+    return opportunities
 
 
 def _base_ticker(papel: str) -> str:
@@ -365,6 +521,32 @@ def get_fundamentus_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         _attach_price_ceiling(filtered_rows, target_yield_pct=target_yield_pct)
     sector_breakdown = _build_sector_breakdown(filtered_rows) if filtered_rows else []
 
+    option_snapshot_date = _latest_option_snapshot_date()
+    target_vencimento = None
+    put_distance_limit_pct = 15.0
+    put_opportunities: List[Dict[str, Any]] = []
+    if option_snapshot_date:
+        base_date = _parse_date(option_snapshot_date) or _parse_date(snap) or dt.date.today()
+        target_vencimento = _next_month_third_friday(base_date)
+    if filtered_rows and option_snapshot_date and target_vencimento:
+        underlyings = [
+            str(row.get("papel") or "").strip().upper()
+            for row in filtered_rows
+            if row.get("papel")
+        ]
+        option_rows = _fetch_put_rows(option_snapshot_date, underlyings)
+        price_map = _fetch_underlying_prices(option_snapshot_date, underlyings)
+        put_opportunities = _build_put_opportunities(
+            fundamentals=filtered_rows,
+            option_rows=option_rows,
+            target_vencimento=target_vencimento,
+            distance_limit_pct=put_distance_limit_pct,
+            price_map=price_map,
+        )
+    put_target_vencimento = (
+        target_vencimento.strftime("%d/%m/%Y") if target_vencimento else None
+    )
+
     window_days = max(1, _get_int_arg(args, "window_days", 30))
     ranking_total = fetch_approved_ranking(snapshot_date=snap or None, limit=20)
     ranking_window = fetch_approved_ranking(
@@ -387,6 +569,10 @@ def get_fundamentus_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         "status_label": status_label,
         "target_yield_pct": target_yield_pct,
         "sector_breakdown": sector_breakdown,
+        "put_opportunities": put_opportunities,
+        "put_target_vencimento": put_target_vencimento,
+        "put_snapshot_date": option_snapshot_date,
+        "put_distance_limit_pct": put_distance_limit_pct,
         "ranking_total": ranking_total["rows"],
         "ranking_window": ranking_window["rows"],
         "ranking_window_days": window_days,

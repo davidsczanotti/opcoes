@@ -19,6 +19,9 @@
         font-size: 0.85rem;
         min-width: 1400px;
       }
+      .put-table {
+        min-width: 900px;
+      }
       .fundamentus-table thead th {
         position: sticky;
         top: 0;
@@ -203,9 +206,124 @@
       {% endif %}
 
       {% if rows %}
+      {% if put_opportunities %}
+        <div class="card mb-3">
+          <div class="card-header">
+            Oportunidades de PUTs
+            {% if put_target_vencimento %}
+              <span class="text-muted small">| Vencimento {{ put_target_vencimento }}</span>
+            {% endif %}
+          </div>
+          <div class="card-body p-0">
+            <p class="text-muted small mb-2 px-3 pt-2">Use o scroll horizontal para ver todas as colunas.</p>
+            <div class="table-responsive fundamentus-table-wrap">
+              <table class="table table-sm table-striped align-middle fundamentus-table put-table js-sort-filter-table" data-default-sort-index="5" data-default-sort-direction="desc">
+                <thead class="table-light">
+                  <tr>
+                    <th data-type="text">
+                      <button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-start" data-index="0" data-type="text">
+                        Papel <span class="sort-indicator"></span>
+                      </button>
+                    </th>
+                    <th class="text-end" data-type="number">
+                      <button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="1" data-type="number">
+                        Cotacao <span class="sort-indicator"></span>
+                      </button>
+                    </th>
+                    <th data-type="text">
+                      <button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-start" data-index="2" data-type="text">
+                        Contrato <span class="sort-indicator"></span>
+                      </button>
+                    </th>
+                    <th class="text-end" data-type="number">
+                      <button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="3" data-type="number">
+                        Strike <span class="sort-indicator"></span>
+                      </button>
+                    </th>
+                    <th class="text-end" data-type="number">
+                      <button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="4" data-type="number">
+                        Ultimo <span class="sort-indicator"></span>
+                      </button>
+                    </th>
+                    <th class="text-end" data-type="percent">
+                      <button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="5" data-type="percent">
+                        Premio % <span class="sort-indicator"></span>
+                      </button>
+                    </th>
+                    <th class="text-end" data-type="percent">
+                      <button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="6" data-type="percent">
+                        Dist. Strike % <span class="sort-indicator"></span>
+                      </button>
+                    </th>
+                  </tr>
+                  <tr>
+                    <th>
+                      <input class="form-control form-control-sm column-filter" data-index="0" data-type="text" placeholder="filtrar">
+                    </th>
+                    <th>
+                      <input class="form-control form-control-sm column-filter" data-index="1" data-type="number" placeholder=">=0" title="Use >, <, <=, >= para comparar">
+                    </th>
+                    <th>
+                      <input class="form-control form-control-sm column-filter" data-index="2" data-type="text" placeholder="filtrar">
+                    </th>
+                    <th>
+                      <input class="form-control form-control-sm column-filter" data-index="3" data-type="number" placeholder=">=0" title="Use >, <, <=, >= para comparar">
+                    </th>
+                    <th>
+                      <input class="form-control form-control-sm column-filter" data-index="4" data-type="number" placeholder=">=0" title="Use >, <, <=, >= para comparar">
+                    </th>
+                    <th>
+                      <input class="form-control form-control-sm column-filter" data-index="5" data-type="percent" placeholder=">=0" title="Use >, <, <=, >= para comparar">
+                    </th>
+                    <th>
+                      <input class="form-control form-control-sm column-filter" data-index="6" data-type="percent" placeholder=">=0" title="Use >, <, <=, >= para comparar">
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for row in put_opportunities %}
+                    <tr>
+                      <td>{{ row.papel }}</td>
+                      <td class="text-end">{{ row.cotacao is not none and ('%.2f'|format(row.cotacao)) or '-' }}</td>
+                      <td>{{ row.contrato or '-' }}</td>
+                      <td class="text-end">{{ row.strike is not none and ('%.2f'|format(row.strike)) or '-' }}</td>
+                      <td class="text-end">{{ row.ultimo is not none and ('%.2f'|format(row.ultimo)) or '-' }}</td>
+                      <td class="text-end">
+                        {% if row.premio_pct is not none %}
+                          {{ '%.2f'|format(row.premio_pct) }}%
+                        {% else %}
+                          -
+                        {% endif %}
+                      </td>
+                      <td class="text-end">
+                        {% if row.distancia_strike_pct is not none %}
+                          {{ '%.2f'|format(row.distancia_strike_pct) }}%
+                        {% else %}
+                          -
+                        {% endif %}
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="card-footer text-muted small">
+            Strike abaixo da cotacao e distancia ate {{ put_distance_limit_pct }}%.
+            {% if put_snapshot_date %}
+              | Snapshot opcoes: {{ put_snapshot_date }}
+            {% endif %}
+          </div>
+        </div>
+      {% elif put_target_vencimento %}
+        <div class="alert alert-secondary small">
+          Sem oportunidades de PUT para o vencimento {{ put_target_vencimento }}.
+        </div>
+      {% endif %}
+
         <p class="text-muted small mb-2">Use o scroll horizontal para ver todas as colunas.</p>
         <div class="table-responsive fundamentus-table-wrap">
-          <table id="fundamentus-table" class="table table-sm table-striped align-middle fundamentus-table">
+          <table id="fundamentus-table" class="table table-sm table-striped align-middle fundamentus-table js-sort-filter-table">
             <thead class="table-light">
               <tr>
                 <th data-type="text">
@@ -563,12 +681,8 @@
     </div>
     <script>
       (() => {
-        const table = document.getElementById("fundamentus-table");
-        if (!table) return;
-        const tbody = table.querySelector("tbody");
-        const sortButtons = table.querySelectorAll(".sort-btn");
-        const filters = table.querySelectorAll(".column-filter");
-        let activeSort = { index: null, direction: 1 };
+        const tables = document.querySelectorAll(".js-sort-filter-table");
+        if (!tables.length) return;
 
         const parseNumber = (text) => {
           if (!text) return NaN;
@@ -595,45 +709,6 @@
           return text.toLowerCase();
         };
 
-        const updateIndicators = () => {
-          sortButtons.forEach((btn) => {
-            const indicator = btn.querySelector(".sort-indicator");
-            if (!indicator) return;
-            const idx = Number(btn.dataset.index);
-            if (idx === activeSort.index) {
-              indicator.textContent = activeSort.direction === 1 ? " ▲" : " ▼";
-            } else {
-              indicator.textContent = "";
-            }
-          });
-        };
-
-        const sortRows = (index, type) => {
-          const rows = Array.from(tbody.querySelectorAll("tr"));
-          if (activeSort.index === index) {
-            activeSort.direction *= -1;
-          } else {
-            activeSort = { index, direction: 1 };
-          }
-          rows.sort((a, b) => {
-            const va = getCellValue(a, index, type);
-            const vb = getCellValue(b, index, type);
-            const aMissing = typeof va === "number" && Number.isNaN(va);
-            const bMissing = typeof vb === "number" && Number.isNaN(vb);
-            if (aMissing && bMissing) return 0;
-            if (aMissing) return 1;
-            if (bMissing) return -1;
-            if (typeof va === "number" && typeof vb === "number") {
-              return (va - vb) * activeSort.direction;
-            }
-            if (va < vb) return -1 * activeSort.direction;
-            if (va > vb) return 1 * activeSort.direction;
-            return 0;
-          });
-          rows.forEach((row) => tbody.appendChild(row));
-          updateIndicators();
-        };
-
         const matchFilter = (cellText, filterValue, type) => {
           const raw = filterValue.trim().toLowerCase();
           if (!raw) return true;
@@ -652,38 +727,103 @@
           return cellText.toLowerCase().includes(raw);
         };
 
-        const applyFilters = () => {
-          const filterValues = Array.from(filters).map((input) => ({
-            index: Number(input.dataset.index),
-            value: input.value,
-            type: input.dataset.type || "text",
-          }));
-          const rows = tbody.querySelectorAll("tr");
-          rows.forEach((row) => {
-            const cells = row.children;
-            const shouldShow = filterValues.every((filter) => {
-              const cell = cells[filter.index];
-              const cellText = cell ? cell.textContent.trim() : "";
-              return matchFilter(cellText, filter.value || "", filter.type);
+        tables.forEach((table) => {
+          const tbody = table.querySelector("tbody");
+          if (!tbody) return;
+          const sortButtons = table.querySelectorAll(".sort-btn");
+          const filters = table.querySelectorAll(".column-filter");
+          let activeSort = { index: null, direction: 1 };
+
+          const updateIndicators = () => {
+            sortButtons.forEach((btn) => {
+              const indicator = btn.querySelector(".sort-indicator");
+              if (!indicator) return;
+              const idx = Number(btn.dataset.index);
+              if (idx === activeSort.index) {
+                indicator.textContent = activeSort.direction === 1 ? " ▲" : " ▼";
+              } else {
+                indicator.textContent = "";
+              }
             });
-            row.style.display = shouldShow ? "" : "none";
+          };
+
+          const sortRows = (index, type, direction = null) => {
+            const rows = Array.from(tbody.querySelectorAll("tr"));
+            if (direction === null) {
+              if (activeSort.index === index) {
+                activeSort.direction *= -1;
+              } else {
+                activeSort = { index, direction: 1 };
+              }
+            } else {
+              activeSort = { index, direction };
+            }
+            rows.sort((a, b) => {
+              const va = getCellValue(a, index, type);
+              const vb = getCellValue(b, index, type);
+              const aMissing = typeof va === "number" && Number.isNaN(va);
+              const bMissing = typeof vb === "number" && Number.isNaN(vb);
+              if (aMissing && bMissing) return 0;
+              if (aMissing) return 1;
+              if (bMissing) return -1;
+              if (typeof va === "number" && typeof vb === "number") {
+                return (va - vb) * activeSort.direction;
+              }
+              if (va < vb) return -1 * activeSort.direction;
+              if (va > vb) return 1 * activeSort.direction;
+              return 0;
+            });
+            rows.forEach((row) => tbody.appendChild(row));
+            updateIndicators();
+          };
+
+          const applyFilters = () => {
+            const filterValues = Array.from(filters).map((input) => ({
+              index: Number(input.dataset.index),
+              value: input.value,
+              type: input.dataset.type || "text",
+            }));
+            const rows = tbody.querySelectorAll("tr");
+            rows.forEach((row) => {
+              const cells = row.children;
+              const shouldShow = filterValues.every((filter) => {
+                const cell = cells[filter.index];
+                const cellText = cell ? cell.textContent.trim() : "";
+                return matchFilter(cellText, filter.value || "", filter.type);
+              });
+              row.style.display = shouldShow ? "" : "none";
+            });
+          };
+
+          sortButtons.forEach((btn) => {
+            btn.addEventListener("click", () => {
+              const index = Number(btn.dataset.index);
+              const type = btn.dataset.type || "text";
+              sortRows(index, type);
+            });
           });
-        };
 
-        sortButtons.forEach((btn) => {
-          btn.addEventListener("click", () => {
-            const index = Number(btn.dataset.index);
-            const type = btn.dataset.type || "text";
-            sortRows(index, type);
+          filters.forEach((input) => {
+            input.addEventListener("input", applyFilters);
           });
-        });
 
-        filters.forEach((input) => {
-          input.addEventListener("input", applyFilters);
-        });
+          const defaultIndex = table.dataset.defaultSortIndex;
+          if (defaultIndex !== undefined) {
+            const index = Number(defaultIndex);
+            if (!Number.isNaN(index)) {
+              const defaultButton = Array.from(sortButtons).find(
+                (btn) => Number(btn.dataset.index) === index
+              );
+              const type = (defaultButton && defaultButton.dataset.type) || "text";
+              const direction = table.dataset.defaultSortDirection === "desc" ? -1 : 1;
+              sortRows(index, type, direction);
+            }
+          }
 
-        updateIndicators();
+          updateIndicators();
+        });
       })();
+
 
       (() => {
         const canvas = document.getElementById("sector-chart");

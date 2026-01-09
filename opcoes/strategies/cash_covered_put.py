@@ -54,12 +54,13 @@ def _calculate_portfolio_metrics(
     cash_mode: str,
     puts_real: List[Dict[str, Any]],
     puts_simulated: List[Dict[str, Any]],
+    total_balance: float,
 ) -> Dict[str, float]:
     # Caixa por modo
     mode = (cash_mode or "real").lower()
     if mode not in ("real", "simulated", "all"):
         mode = "real"
-    total_balance = finance.get_balance(mode="all" if mode == "all" else mode)
+    total_balance = float(total_balance or 0.0)
 
     # Colateral travado somente no modo selecionado
     collateral_locked = 0.0
@@ -183,107 +184,95 @@ def _build_put_suggestions(
     return suggestions
 
 
-def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
-    defaults = get_cash_put_settings()
-
-    underlying = (args.get("underlying") or defaults.underlying).strip().upper()
-    min_yield_pct = _get_float_arg(args, "min_yield_pct", defaults.min_yield_pct)
-    min_buffer_pct = _get_float_arg(args, "min_buffer_pct", defaults.min_buffer_pct)
-    min_days = _get_int_arg(args, "min_days", defaults.min_days)
-    max_days = _get_int_arg(args, "max_days", defaults.max_days)
-    contract_size = max(_get_int_arg(args, "contract_size", defaults.contract_size), 1)
-    limit = _get_int_arg(args, "limit", defaults.limit)
-    cash_mode = (args.get("cash_mode") or defaults.cash_mode).strip().lower()
-
-    # Buscar posições abertas de Puts (Real vs Simulado)
-    all_positions = list_positions(include_closed=False)
-    puts_real = []
-    puts_simulated = []
-    
-    # Agregador de prêmios simulados
+def calculate_cash_covered_put_strategy(
+    *,
+    underlying: str,
+    positions_open: List[Dict[str, Any]],
+    options_rows: List[Dict[str, Any]],
+    quote: Optional[Dict[str, Any]],
+    min_yield_pct: float,
+    min_buffer_pct: float,
+    min_days: int,
+    max_days: int,
+    contract_size: int,
+    limit: int,
+    cash_mode: str,
+    total_balance: float,
+) -> Dict[str, Any]:
+    """
+    Pure strategy logic for Cash Covered Put.
+    Filters positions, derives metrics, and builds suggestions from provided data.
+    """
+    puts_real: List[Dict[str, Any]] = []
+    puts_simulated: List[Dict[str, Any]] = []
     sim_premiums_agg: Dict[str, float] = {}
 
-    for pos in all_positions:
+    for pos in positions_open:
         ticker = (pos.get("ticker") or "").upper()
-        # Se trade_type for "stock", ignora. Se não tiver trade_type explícito, tenta inferir.
-        # Mas `list_positions` retorna o que está no banco.
-        # Vamos checar se é PUT.
-        if infer_option_type(ticker) == "PUT":
-            # Filtra pelo underlying se estiver definido na view
-            pos_underlying = (pos.get("underlying") or "").upper()
-            if underlying and pos_underlying != underlying:
-                continue
-            
-            # Enrich position with Cash-Put specific metrics
-            strike = pos.get("strike")
-            entry = pos.get("entry_price") or 0.0
-            qty = pos.get("qty") or 0
-            fees = pos.get("fees") or 0.0
-            spot = pos.get("underlying_price")
+        if infer_option_type(ticker) != "PUT":
+            continue
+        pos_underlying = (pos.get("underlying") or "").upper()
+        if underlying and pos_underlying != underlying:
+            continue
 
-            stock_be = None
-            dist_be = None
-            projected_outcome = None
-            collateral_yield_pct = None
-            
-            if strike and entry:
-                stock_be = strike - entry
+        pos_data = dict(pos)
+        strike = pos_data.get("strike")
+        entry = pos_data.get("entry_price") or 0.0
+        qty = pos_data.get("qty") or 0
+        fees = pos_data.get("fees") or 0.0
+        spot = pos_data.get("underlying_price")
+
+        stock_be = None
+        dist_be = None
+        projected_outcome = None
+        collateral_yield_pct = None
+
+        if strike and entry:
+            stock_be = strike - entry
+            try:
+                if strike > 0:
+                    collateral_yield_pct = (entry / strike) * 100.0
+            except Exception:
+                collateral_yield_pct = None
+
+            if spot and spot > 0:
+                dist_be = (spot - stock_be) / spot * 100.0
+                if spot < strike:
+                    outcome_per_share = (spot - strike) + entry
+                else:
+                    outcome_per_share = entry
+                projected_outcome = (outcome_per_share * qty) - fees
+
+        pos_data["stock_breakeven"] = stock_be
+        pos_data["dist_be_pct"] = dist_be
+        pos_data["projected_outcome"] = projected_outcome
+        pos_data["collateral_yield_pct"] = collateral_yield_pct
+
+        if pos_data.get("is_simulated"):
+            puts_simulated.append(pos_data)
+            t_date = pos_data.get("trade_date")
+            if t_date:
                 try:
-                    if strike > 0:
-                        # Aproximação do retorno sobre o capital imobilizado:
-                        # (prêmio / strike) * 100, equivalente a
-                        # (prêmio_total / capital_imobilizado) * 100.
-                        collateral_yield_pct = (entry / strike) * 100.0
-                except Exception:
-                    collateral_yield_pct = None
+                    dt = datetime.date.fromisoformat(t_date)
+                    m_key = dt.strftime("%Y-%m")
+                    trade_type = (pos_data.get("trade_type") or "swing").strip().lower()
+                    aliquota_opts = 0.20 if "day" in trade_type else 0.15
+                    premium_bruto = (entry * qty)
+                    base_premio = max(0.0, float(premium_bruto - fees))
+                    ir_premio = base_premio * aliquota_opts
+                    val = float(premium_bruto - fees - ir_premio)
+                    sim_premiums_agg[m_key] = sim_premiums_agg.get(m_key, 0.0) + val
+                except ValueError:
+                    pass
+        else:
+            puts_real.append(pos_data)
 
-                if spot and spot > 0:
-                    dist_be = (spot - stock_be) / spot * 100.0
-                    # Resultado financeiro se exercido no preço atual (ou expirado)
-                    # Se Spot < Strike: Exercido. Resultado = (Spot - Strike) + Premium
-                    # Se Spot >= Strike: Expira pó. Resultado = Premium
-                    if spot < strike:
-                        outcome_per_share = (spot - strike) + entry
-                    else:
-                        outcome_per_share = entry
-                    
-                    projected_outcome = (outcome_per_share * qty) - fees
-
-            pos["stock_breakeven"] = stock_be
-            pos["dist_be_pct"] = dist_be
-            pos["projected_outcome"] = projected_outcome
-            pos["collateral_yield_pct"] = collateral_yield_pct
-
-            if pos.get("is_simulated"):
-                puts_simulated.append(pos)
-                # Soma prêmios simulados por mês
-                t_date = pos.get("trade_date")
-                if t_date:
-                    try:
-                        # Parse YYYY-MM-DD
-                        dt = datetime.date.fromisoformat(t_date)
-                        m_key = dt.strftime("%Y-%m")
-                        # Líquido aproximado: prêmio - taxas - provisão DARF (15% swing / 20% day trade).
-                        trade_type = (pos.get("trade_type") or "swing").strip().lower()
-                        aliquota_opts = 0.20 if "day" in trade_type else 0.15
-                        premium_bruto = (entry * qty)
-                        base_premio = max(0.0, float(premium_bruto - fees))
-                        ir_premio = base_premio * aliquota_opts
-                        val = float(premium_bruto - fees - ir_premio)
-                        sim_premiums_agg[m_key] = sim_premiums_agg.get(m_key, 0.0) + val
-                    except ValueError:
-                        pass
-            else:
-                puts_real.append(pos)
-    
-    # Formata lista de prêmios simulados (ordenada desc)
     simulated_monthly_premiums_fallback = []
     for m in sorted(sim_premiums_agg.keys(), reverse=True):
         simulated_monthly_premiums_fallback.append({"month": m, "total": sim_premiums_agg[m]})
 
-    rows = fetch_latest_underlying_options(underlying=underlying)
     suggestions = _build_put_suggestions(
-        rows,
+        options_rows,
         min_yield_pct=min_yield_pct,
         min_buffer_pct=min_buffer_pct,
         min_days=min_days,
@@ -291,19 +280,6 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         contract_size=contract_size,
         limit=limit,
     )
-    quote = fetch_latest_underlying_quote(underlying)
-
-    if args:
-        update_cash_put_settings(
-            underlying=underlying,
-            min_yield_pct=min_yield_pct,
-            min_buffer_pct=min_buffer_pct,
-            min_days=min_days,
-            max_days=max_days,
-            contract_size=contract_size,
-            limit=limit,
-            cash_mode=cash_mode,
-        )
 
     spot_price: Optional[float] = None
     if quote and quote.get("price") is not None:
@@ -318,19 +294,76 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         cash_mode=cash_mode,
         puts_real=puts_real,
         puts_simulated=puts_simulated,
+        total_balance=total_balance,
     )
-    # Prêmios líquidos por mês (PREMIUM - DARF) via caixa (ledger).
-    monthly_premiums = finance.get_monthly_premiums(include_darf=True, is_simulated=False)
-    simulated_monthly_premiums = finance.get_monthly_premiums(include_darf=True, is_simulated=True) or simulated_monthly_premiums_fallback
-    transactions = finance.get_transactions(limit=10)
 
     return {
         "underlying": underlying,
         "underlying_quote": quote,
         "puts_real": puts_real,
         "puts_simulated": puts_simulated,
-        "simulated_monthly_premiums": simulated_monthly_premiums,
         "cash_mode": cash_mode,
+        "suggestions": suggestions,
+        "finance": finance_metrics,
+        "simulated_monthly_premiums_fallback": simulated_monthly_premiums_fallback,
+    }
+
+
+def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
+    defaults = get_cash_put_settings()
+
+    underlying = (args.get("underlying") or defaults.underlying).strip().upper()
+    min_yield_pct = _get_float_arg(args, "min_yield_pct", defaults.min_yield_pct)
+    min_buffer_pct = _get_float_arg(args, "min_buffer_pct", defaults.min_buffer_pct)
+    min_days = _get_int_arg(args, "min_days", defaults.min_days)
+    max_days = _get_int_arg(args, "max_days", defaults.max_days)
+    contract_size = max(_get_int_arg(args, "contract_size", defaults.contract_size), 1)
+    limit = _get_int_arg(args, "limit", defaults.limit)
+    cash_mode = (args.get("cash_mode") or defaults.cash_mode).strip().lower()
+
+    positions_open = list_positions(include_closed=False)
+    rows = fetch_latest_underlying_options(underlying=underlying)
+    quote = fetch_latest_underlying_quote(underlying)
+
+    if args:
+        update_cash_put_settings(
+            underlying=underlying,
+            min_yield_pct=min_yield_pct,
+            min_buffer_pct=min_buffer_pct,
+            min_days=min_days,
+            max_days=max_days,
+            contract_size=contract_size,
+            limit=limit,
+            cash_mode=cash_mode,
+        )
+
+    mode = (cash_mode or "real").lower()
+    if mode not in ("real", "simulated", "all"):
+        mode = "real"
+    total_balance = finance.get_balance(mode="all" if mode == "all" else mode)
+
+    ctx = calculate_cash_covered_put_strategy(
+        underlying=underlying,
+        positions_open=positions_open,
+        options_rows=rows,
+        quote=quote,
+        min_yield_pct=min_yield_pct,
+        min_buffer_pct=min_buffer_pct,
+        min_days=min_days,
+        max_days=max_days,
+        contract_size=contract_size,
+        limit=limit,
+        cash_mode=mode,
+        total_balance=total_balance,
+    )
+    # Prêmios líquidos por mês (PREMIUM - DARF) via caixa (ledger).
+    monthly_premiums = finance.get_monthly_premiums(include_darf=True, is_simulated=False)
+    simulated_monthly_premiums = finance.get_monthly_premiums(include_darf=True, is_simulated=True) or ctx.get("simulated_monthly_premiums_fallback", [])
+    transactions = finance.get_transactions(limit=10)
+
+    return {
+        **ctx,
+        "simulated_monthly_premiums": simulated_monthly_premiums,
         "filters": {
             "min_yield_pct": min_yield_pct,
             "min_buffer_pct": min_buffer_pct,
@@ -339,8 +372,6 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
             "contract_size": contract_size,
             "limit": limit,
         },
-        "suggestions": suggestions,
-        "finance": finance_metrics,
         "monthly_premiums": monthly_premiums,
         "recent_transactions": transactions,
     }
