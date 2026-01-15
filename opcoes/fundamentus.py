@@ -537,6 +537,29 @@ def fetch_signals(
         conn.close()
 
 
+def fetch_signal_dates(
+    *,
+    end_date: Optional[str] = None,
+    limit: int = 2,
+    db_path: Optional[Path] = None,
+) -> List[str]:
+    conn = _connect(db_path)
+    try:
+        query = "SELECT DISTINCT snapshot_date FROM fundamentus_signals"
+        params: list[object] = []
+        if end_date:
+            query += " WHERE snapshot_date <= ?"
+            params.append(end_date)
+        query += " ORDER BY snapshot_date DESC"
+        if limit and limit > 0:
+            query += " LIMIT ?"
+            params.append(int(limit))
+        rows = conn.execute(query, params).fetchall()
+        return [row["snapshot_date"] for row in rows if row and row["snapshot_date"]]
+    finally:
+        conn.close()
+
+
 def fetch_approved_ranking(
     *,
     window_days: Optional[int] = None,
@@ -595,5 +618,6 @@ __all__ = [
     "latest_snapshot_date",
     "fetch_snapshot",
     "fetch_signals",
+    "fetch_signal_dates",
     "fetch_approved_ranking",
 ]

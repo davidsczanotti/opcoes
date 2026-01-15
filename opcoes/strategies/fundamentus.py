@@ -8,7 +8,13 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 import yfinance as yf
 
-from ..fundamentus import fetch_approved_ranking, fetch_signals, fetch_snapshot, latest_snapshot_date
+from ..fundamentus import (
+    fetch_approved_ranking,
+    fetch_signal_dates,
+    fetch_signals,
+    fetch_snapshot,
+    latest_snapshot_date,
+)
 from ..config import get_db_path
 from ..settings import get_fundamentus_settings
 from ..utils import parse_ptbr_number
@@ -515,6 +521,56 @@ def get_fundamentus_context(args: Mapping[str, Any]) -> Dict[str, Any]:
     target_yield_pct = fund_cfg.target_yield_pct or _TARGET_YIELD_PCT
 
     option_underlyings = _fetch_option_underlyings()
+
+    changes_reference_date = None
+    entered_opportunities: List[str] = []
+    exited_opportunities: List[str] = []
+    current_approved_count = 0
+    previous_approved_count = 0
+
+    if signals and snap:
+        signal_dates = fetch_signal_dates(end_date=snap, limit=2)
+        if signal_dates and signal_dates[0] == snap and len(signal_dates) > 1:
+            previous_snapshot = signal_dates[1]
+            prev_rows = fetch_snapshot(snapshot_date=previous_snapshot, limit=limit)
+            prev_signals = fetch_signals(snapshot_date=previous_snapshot)
+            prev_signals_map = {s["papel"]: s for s in prev_signals if s.get("papel")}
+            for row in prev_rows:
+                prev_signal = prev_signals_map.get(row.get("papel"))
+                if prev_signal:
+                    row["signal"] = prev_signal
+
+            current_approved_rows = [
+                row for row in rows if row.get("signal", {}).get("status") == "approved"
+            ]
+            prev_approved_rows = [
+                row for row in prev_rows if row.get("signal", {}).get("status") == "approved"
+            ]
+            current_approved_rows = _dedupe_by_option_listing(
+                current_approved_rows,
+                option_underlyings,
+            )
+            prev_approved_rows = _dedupe_by_option_listing(
+                prev_approved_rows,
+                option_underlyings,
+            )
+
+            current_set = {
+                (row.get("papel") or "").strip().upper()
+                for row in current_approved_rows
+                if row.get("papel")
+            }
+            prev_set = {
+                (row.get("papel") or "").strip().upper()
+                for row in prev_approved_rows
+                if row.get("papel")
+            }
+            entered_opportunities = sorted(current_set - prev_set)
+            exited_opportunities = sorted(prev_set - current_set)
+            current_approved_count = len(current_set)
+            previous_approved_count = len(prev_set)
+            changes_reference_date = previous_snapshot
+
     filtered_rows = _dedupe_by_option_listing(filtered_rows, option_underlyings)
     if filtered_rows:
         _attach_sector_info(filtered_rows)
@@ -569,6 +625,11 @@ def get_fundamentus_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         "status_label": status_label,
         "target_yield_pct": target_yield_pct,
         "sector_breakdown": sector_breakdown,
+        "changes_reference_date": changes_reference_date,
+        "entered_opportunities": entered_opportunities,
+        "exited_opportunities": exited_opportunities,
+        "current_approved_count": current_approved_count,
+        "previous_approved_count": previous_approved_count,
         "put_opportunities": put_opportunities,
         "put_target_vencimento": put_target_vencimento,
         "put_snapshot_date": option_snapshot_date,
