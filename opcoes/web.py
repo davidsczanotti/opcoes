@@ -10,12 +10,18 @@ from .config import get_db_path
 from .portfolio import add_position, delete_position, list_positions, update_position, close_position, get_position
 from .utils import infer_option_type, parse_ptbr_number
 from .settings import (
+    CashCoveredPutSettings,
+    CoveredCallSettings,
     FeeSettings,
     StrategySettings,
     FundamentusSettings,
+    get_cash_put_settings,
+    get_covered_call_settings,
     get_fee_settings,
     get_strategy_settings,
     get_fundamentus_settings,
+    update_cash_put_settings,
+    update_covered_call_settings,
     update_fee_settings,
     update_strategy_settings,
     update_fundamentus_settings,
@@ -341,12 +347,54 @@ def create_app() -> Flask:
                 target_yield_pct=fund_target_yield_pct or 8.0,
             )
 
+            cash_put_cfg = get_cash_put_settings()
+            buyback_raw = form.get("cash_put_buyback_target_pct")
+            if buyback_raw and buyback_raw.strip():
+                buyback_target_pct = _parse_form_float(buyback_raw)
+            else:
+                buyback_target_pct = cash_put_cfg.buyback_target_pct
+            update_cash_put_settings(
+                underlying=cash_put_cfg.underlying,
+                min_yield_pct=cash_put_cfg.min_yield_pct,
+                min_buffer_pct=cash_put_cfg.min_buffer_pct,
+                min_days=cash_put_cfg.min_days,
+                max_days=cash_put_cfg.max_days,
+                contract_size=cash_put_cfg.contract_size,
+                limit=cash_put_cfg.limit,
+                cash_mode=cash_put_cfg.cash_mode,
+                buyback_target_pct=buyback_target_pct,
+            )
+
+            ccall_cfg = get_covered_call_settings()
+            ccall_buyback_raw = form.get("ccall_buyback_target_pct")
+            if ccall_buyback_raw and ccall_buyback_raw.strip():
+                ccall_buyback_target_pct = _parse_form_float(ccall_buyback_raw)
+            else:
+                ccall_buyback_target_pct = ccall_cfg.buyback_target_pct
+            update_covered_call_settings(
+                underlying=ccall_cfg.underlying,
+                min_extrinsic=ccall_cfg.min_extrinsic,
+                min_days=ccall_cfg.min_days,
+                max_days=ccall_cfg.max_days,
+                min_dist_strike=ccall_cfg.min_dist_strike,
+                buyback_target_pct=ccall_buyback_target_pct,
+            )
+
             return redirect(url_for("settings_view"))
 
         fees_cfg: FeeSettings = get_fee_settings()
         strat_cfg: StrategySettings = get_strategy_settings()
         fund_cfg: FundamentusSettings = get_fundamentus_settings()
-        return render_template("settings.html", fees=fees_cfg, strat=strat_cfg, fund=fund_cfg)
+        ccall_cfg: CoveredCallSettings = get_covered_call_settings()
+        cash_put_cfg: CashCoveredPutSettings = get_cash_put_settings()
+        return render_template(
+            "settings.html",
+            fees=fees_cfg,
+            strat=strat_cfg,
+            fund=fund_cfg,
+            covered_call=ccall_cfg,
+            cash_put=cash_put_cfg,
+        )
     @app.route("/positions")
     def positions() -> str:
         ticker_contains = (request.args.get("ticker") or "").strip().upper()

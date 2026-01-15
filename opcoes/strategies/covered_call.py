@@ -224,6 +224,45 @@ def _parse_float(value) -> float | None:
         return None
 
 
+def _apply_buyback_metrics(
+    call_positions: List[Dict],
+    *,
+    buyback_target_pct: float,
+) -> List[Dict]:
+    output: List[Dict] = []
+    for pos in call_positions:
+        pos_data = dict(pos)
+        entry = pos_data.get("entry_price") or 0.0
+        last_price = pos_data.get("last_price")
+        open_qty = pos_data.get("open_qty") or pos_data.get("qty") or 0
+
+        buyback_profit_per_share = None
+        buyback_profit_total = None
+        buyback_profit_pct = None
+        buyback_target_hit = False
+
+        if entry and last_price is not None and open_qty:
+            try:
+                buyback_profit_per_share = float(entry) - float(last_price)
+                buyback_profit_total = buyback_profit_per_share * int(open_qty)
+                if entry > 0:
+                    buyback_profit_pct = (buyback_profit_per_share / float(entry)) * 100.0
+            except Exception:
+                buyback_profit_per_share = None
+                buyback_profit_total = None
+                buyback_profit_pct = None
+
+        if buyback_profit_pct is not None and buyback_target_pct is not None:
+            buyback_target_hit = buyback_profit_pct >= float(buyback_target_pct)
+
+        pos_data["buyback_profit_per_share"] = buyback_profit_per_share
+        pos_data["buyback_profit_total"] = buyback_profit_total
+        pos_data["buyback_profit_pct"] = buyback_profit_pct
+        pos_data["buyback_target_hit"] = buyback_target_hit
+        output.append(pos_data)
+    return output
+
+
 def calculate_covered_call_strategy(
     underlying: str,
     positions_open: List[Dict],
@@ -233,6 +272,7 @@ def calculate_covered_call_strategy(
     min_days: int,
     max_days: int,
     min_dist_strike: float,
+    buyback_target_pct: float,
 ) -> Dict[str, Any]:
     """
     Pure strategy logic for Covered Call.
@@ -246,6 +286,8 @@ def calculate_covered_call_strategy(
 
     call_summary_real = _call_cashflow_summaries(covered_real, lots_real)
     call_summary_sim = _call_cashflow_summaries(covered_sim, lots_sim)
+    covered_real = _apply_buyback_metrics(covered_real, buyback_target_pct=buyback_target_pct)
+    covered_sim = _apply_buyback_metrics(covered_sim, buyback_target_pct=buyback_target_pct)
 
     # Reuses the existing helper, but we need to adapt _fetch_bova_suggestions logic
     # to accept rows instead of fetching them.
@@ -320,6 +362,9 @@ def calculate_covered_call_strategy(
         "call_summary_real": call_summary_real,
         "call_summary_sim": call_summary_sim,
         "suggestions": suggestions,
+        "buyback_target_pct": buyback_target_pct,
+        "buyback_candidates_real": [p for p in covered_real if p.get("buyback_target_hit")],
+        "buyback_candidates_simulated": [p for p in covered_sim if p.get("buyback_target_hit")],
     }
 
 
@@ -345,6 +390,7 @@ def get_covered_call_context(args: Mapping[str, Any]) -> Dict[str, Any]:
             min_days=min_days,
             max_days=max_days,
             min_dist_strike=min_dist_strike,
+            buyback_target_pct=defaults.buyback_target_pct,
         )
 
     ctx = calculate_covered_call_strategy(
@@ -356,6 +402,7 @@ def get_covered_call_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         min_days=min_days,
         max_days=max_days,
         min_dist_strike=min_dist_strike,
+        buyback_target_pct=defaults.buyback_target_pct,
     )
 
     ctx["filters"] = {

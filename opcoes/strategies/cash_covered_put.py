@@ -249,6 +249,7 @@ def calculate_cash_covered_put_strategy(
     limit: int,
     cash_mode: str,
     total_balance: float,
+    buyback_target_pct: float,
 ) -> Dict[str, Any]:
     """
     Pure strategy logic for Cash Covered Put.
@@ -274,12 +275,18 @@ def calculate_cash_covered_put_strategy(
         entry = pos_data.get("entry_price") or 0.0
         qty = pos_data.get("qty") or 0
         fees = pos_data.get("fees") or 0.0
+        open_qty = pos_data.get("open_qty") or qty
         spot = pos_data.get("underlying_price")
+        last_price = pos_data.get("last_price")
 
         stock_be = None
         dist_be = None
         projected_outcome = None
         collateral_yield_pct = None
+        buyback_profit_per_share = None
+        buyback_profit_total = None
+        buyback_profit_pct = None
+        buyback_target_hit = False
 
         if strike and entry:
             stock_be = strike - entry
@@ -297,10 +304,28 @@ def calculate_cash_covered_put_strategy(
                     outcome_per_share = entry
                 projected_outcome = (outcome_per_share * qty) - fees
 
+        if entry and last_price is not None and open_qty:
+            try:
+                buyback_profit_per_share = float(entry) - float(last_price)
+                buyback_profit_total = buyback_profit_per_share * int(open_qty)
+                if entry > 0:
+                    buyback_profit_pct = (buyback_profit_per_share / float(entry)) * 100.0
+            except Exception:
+                buyback_profit_per_share = None
+                buyback_profit_total = None
+                buyback_profit_pct = None
+
+        if buyback_profit_pct is not None and buyback_target_pct is not None:
+            buyback_target_hit = buyback_profit_pct >= float(buyback_target_pct)
+
         pos_data["stock_breakeven"] = stock_be
         pos_data["dist_be_pct"] = dist_be
         pos_data["projected_outcome"] = projected_outcome
         pos_data["collateral_yield_pct"] = collateral_yield_pct
+        pos_data["buyback_profit_per_share"] = buyback_profit_per_share
+        pos_data["buyback_profit_total"] = buyback_profit_total
+        pos_data["buyback_profit_pct"] = buyback_profit_pct
+        pos_data["buyback_target_hit"] = buyback_target_hit
 
         if pos_data.get("is_simulated"):
             puts_simulated.append(pos_data)
@@ -342,6 +367,9 @@ def calculate_cash_covered_put_strategy(
         "suggestions": suggestions,
         "finance": finance_metrics,
         "simulated_monthly_premiums_fallback": simulated_monthly_premiums_fallback,
+        "buyback_target_pct": buyback_target_pct,
+        "buyback_candidates_real": [p for p in puts_real if p.get("buyback_target_hit")],
+        "buyback_candidates_simulated": [p for p in puts_simulated if p.get("buyback_target_hit")],
     }
 
 
@@ -356,6 +384,11 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
     contract_size = max(_get_int_arg(args, "contract_size", defaults.contract_size), 1)
     limit = _get_int_arg(args, "limit", defaults.limit)
     cash_mode = (args.get("cash_mode") or defaults.cash_mode).strip().lower()
+    buyback_target_pct = _get_float_arg(
+        args,
+        "buyback_target_pct",
+        defaults.buyback_target_pct,
+    )
 
     positions_open = list_positions(include_closed=False)
     rows = fetch_latest_underlying_options(underlying=underlying)
@@ -371,6 +404,7 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
             contract_size=contract_size,
             limit=limit,
             cash_mode=cash_mode,
+            buyback_target_pct=buyback_target_pct,
         )
 
     mode = (cash_mode or "real").lower()
@@ -391,6 +425,7 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         limit=limit,
         cash_mode=mode,
         total_balance=total_balance,
+        buyback_target_pct=buyback_target_pct,
     )
     puts_all = [pos for pos in positions_open if _is_put_option_position(pos)]
     puts_real_all = [pos for pos in puts_all if not bool(pos.get("is_simulated"))]
@@ -448,6 +483,7 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
             "max_days": max_days,
             "contract_size": contract_size,
             "limit": limit,
+            "buyback_target_pct": buyback_target_pct,
         },
         "monthly_premiums": monthly_premiums,
         "recent_transactions": transactions,

@@ -32,6 +32,7 @@ class CashCoveredPutSettings:
     contract_size: int = 100
     limit: int = 50
     cash_mode: str = "real"
+    buyback_target_pct: float = 50.0
 
 
 @dataclass
@@ -41,6 +42,7 @@ class CoveredCallSettings:
     min_days: int = 30
     max_days: int = 200
     min_dist_strike: float = 1.0
+    buyback_target_pct: float = 50.0
 
 
 @dataclass
@@ -163,6 +165,7 @@ def get_cash_put_settings() -> CashCoveredPutSettings:
         contract_size=_parse_int("cash_put_contract_size", 100),
         limit=_parse_int("cash_put_limit", 50),
         cash_mode=cash_mode,
+        buyback_target_pct=_parse_float("cash_put_buyback_target_pct", 50.0),
     )
 
 
@@ -202,6 +205,7 @@ def get_covered_call_settings() -> CoveredCallSettings:
         min_days=_parse_int("ccall_min_days", 30),
         max_days=_parse_int("ccall_max_days", 200),
         min_dist_strike=_parse_float("ccall_min_dist_strike", 1.0),
+        buyback_target_pct=_parse_float("ccall_buyback_target_pct", 50.0),
     )
 
 
@@ -297,6 +301,7 @@ def update_cash_put_settings(
     contract_size: int,
     limit: int,
     cash_mode: str,
+    buyback_target_pct: float,
 ) -> None:
     conn = _connect()
     try:
@@ -309,6 +314,7 @@ def update_cash_put_settings(
             "cash_put_contract_size": int(contract_size),
             "cash_put_limit": int(limit),
             "cash_put_cash_mode": (cash_mode or "real").strip().lower() or "real",
+            "cash_put_buyback_target_pct": float(buyback_target_pct),
         }
         for key, value in params.items():
             conn.execute(
@@ -331,6 +337,7 @@ def update_covered_call_settings(
     min_days: int,
     max_days: int,
     min_dist_strike: float,
+    buyback_target_pct: float,
 ) -> None:
     conn = _connect()
     try:
@@ -340,6 +347,7 @@ def update_covered_call_settings(
             "ccall_min_days": int(min_days),
             "ccall_max_days": int(max_days),
             "ccall_min_dist_strike": float(min_dist_strike),
+            "ccall_buyback_target_pct": float(buyback_target_pct),
         }
         for key, value in params.items():
             conn.execute(

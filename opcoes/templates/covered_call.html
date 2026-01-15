@@ -347,6 +347,14 @@
       {% endif %}
 
       <h2 class="h5 mt-4">Calls de {{ underlying }} em aberto (real)</h2>
+      <p class="text-muted small mb-2">
+        Meta de recompra: {{ "%.1f"|format(buyback_target_pct) }}% do prêmio.
+      </p>
+      {% if buyback_candidates_real %}
+        <div class="alert alert-success small">
+          Meta atingida para recompra: {{ buyback_candidates_real | map(attribute='ticker') | join(', ') }}.
+        </div>
+      {% endif %}
       {% if not covered_real %}
         <p class="text-muted small">Nenhuma call de {{ underlying }} em aberto nas posições reais.</p>
       {% else %}
@@ -359,6 +367,7 @@
                 <th class="text-end">D. Úteis</th>
                 <th class="text-end">Qtd</th>
                 <th class="text-end">Último</th>
+                <th class="text-end" title="(Prêmio - Último) e % do prêmio">Recompra</th>
                 <th class="text-end">Spot</th>
                 <th class="text-end">Extr.% Spot</th>
                 <th class="text-end">% p/ 2x</th>
@@ -376,6 +385,19 @@
                   <td class="text-end">{{ pos.open_qty }}</td>
                   <td class="text-end">
                     {% if pos.last_price is not none %}{{ "%.2f"|format(pos.last_price) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end {% if pos.buyback_profit_per_share and pos.buyback_profit_per_share > 0 %}text-success{% elif pos.buyback_profit_per_share and pos.buyback_profit_per_share < 0 %}text-danger{% endif %} fw-semibold">
+                    {% if pos.buyback_profit_per_share is not none %}
+                      {{ "%.2f"|format(pos.buyback_profit_per_share) }}
+                      <div class="text-muted small">
+                        {% if pos.buyback_profit_pct is not none %}{{ "%.1f"|format(pos.buyback_profit_pct) }}%{% else %}-{% endif %}
+                        {% if pos.buyback_target_hit %}
+                          <span class="badge text-bg-success ms-1">Meta</span>
+                        {% endif %}
+                      </div>
+                    {% else %}
+                      -
+                    {% endif %}
                   </td>
                   <td class="text-end">
                     {% if pos.underlying_price is not none %}{{ "%.2f"|format(pos.underlying_price) }}{% else %}-{% endif %}
@@ -429,6 +451,14 @@
       {% endif %}
 
       <h2 class="h5 mt-4">Calls de {{ underlying }} em aberto (simulado)</h2>
+      <p class="text-muted small mb-2">
+        Meta de recompra: {{ "%.1f"|format(buyback_target_pct) }}% do prêmio.
+      </p>
+      {% if buyback_candidates_simulated %}
+        <div class="alert alert-warning small">
+          Meta atingida (simulado): {{ buyback_candidates_simulated | map(attribute='ticker') | join(', ') }}.
+        </div>
+      {% endif %}
       {% if not covered_sim %}
         <p class="text-muted small">Nenhuma call de {{ underlying }} em aberto nas posições simuladas.</p>
       {% else %}
@@ -441,6 +471,7 @@
                 <th class="text-end">D. Úteis</th>
                 <th class="text-end">Qtd</th>
                 <th class="text-end">Último</th>
+                <th class="text-end" title="(Prêmio - Último) e % do prêmio">Recompra</th>
                 <th class="text-end">Spot</th>
                 <th class="text-end">Extr.% Spot</th>
                 <th class="text-end">% p/ 2x</th>
@@ -458,6 +489,19 @@
                   <td class="text-end">{{ pos.open_qty }}</td>
                   <td class="text-end">
                     {% if pos.last_price is not none %}{{ "%.2f"|format(pos.last_price) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end {% if pos.buyback_profit_per_share and pos.buyback_profit_per_share > 0 %}text-success{% elif pos.buyback_profit_per_share and pos.buyback_profit_per_share < 0 %}text-danger{% endif %} fw-semibold">
+                    {% if pos.buyback_profit_per_share is not none %}
+                      {{ "%.2f"|format(pos.buyback_profit_per_share) }}
+                      <div class="text-muted small">
+                        {% if pos.buyback_profit_pct is not none %}{{ "%.1f"|format(pos.buyback_profit_pct) }}%{% else %}-{% endif %}
+                        {% if pos.buyback_target_hit %}
+                          <span class="badge text-bg-warning ms-1">Meta</span>
+                        {% endif %}
+                      </div>
+                    {% else %}
+                      -
+                    {% endif %}
                   </td>
                   <td class="text-end">
                     {% if pos.underlying_price is not none %}{{ "%.2f"|format(pos.underlying_price) }}{% else %}-{% endif %}
