@@ -457,6 +457,24 @@ def _attach_price_ceiling(
         row["preco_teto"] = price_val * (dy_val / target_yield_pct)
 
 
+def _attach_peg_ratio(rows: List[Dict[str, Any]]) -> None:
+    if not rows:
+        return
+    for row in rows:
+        pl = row.get("pl")
+        growth = row.get("cresc_rec_5a")
+        try:
+            pl_val = float(pl) if pl is not None else None
+            growth_val = float(growth) if growth is not None else None
+        except (TypeError, ValueError):
+            row["peg_ratio"] = None
+            continue
+        if pl_val is None or growth_val is None or pl_val <= 0 or growth_val <= 0:
+            row["peg_ratio"] = None
+            continue
+        row["peg_ratio"] = pl_val / growth_val
+
+
 def _get_optional_int_arg(args: Mapping[str, Any], name: str) -> Optional[int]:
     try:
         raw = args.get(name)
@@ -575,6 +593,7 @@ def get_fundamentus_context(args: Mapping[str, Any]) -> Dict[str, Any]:
     if filtered_rows:
         _attach_sector_info(filtered_rows)
         _attach_price_ceiling(filtered_rows, target_yield_pct=target_yield_pct)
+        _attach_peg_ratio(filtered_rows)
     sector_breakdown = _build_sector_breakdown(filtered_rows) if filtered_rows else []
 
     option_snapshot_date = _latest_option_snapshot_date()

@@ -382,6 +382,9 @@
       {% endif %}
 
         <p class="text-muted small mb-2">Use o scroll horizontal para ver todas as colunas.</p>
+        <p class="text-muted small mb-2">
+          PEG (aprox.) = P/L dividido pelo Cresc. Rec. 5a (%). Usa crescimento de receita como proxy; valores <= 0 ficam em branco.
+        </p>
         <div class="table-responsive fundamentus-table-wrap">
           <table id="fundamentus-table" class="table table-sm table-striped align-middle fundamentus-table js-sort-filter-table">
             <thead class="table-light">
@@ -496,23 +499,28 @@
                     Cresc. Rec.5a <span class="sort-indicator"></span>
                   </button>
                 </th>
+                <th class="text-end" data-type="number">
+                  <button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="22" data-type="number" title="PEG = P/L dividido pelo Cresc. Rec. 5a (%)">
+                    PEG <span class="sort-indicator"></span>
+                  </button>
+                </th>
                 <th class="text-end" data-type="text">
-                  <button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="22" data-type="text">
+                  <button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="23" data-type="text">
                     Status <span class="sort-indicator"></span>
                   </button>
                 </th>
                 <th data-type="text">
-                  <button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-start" data-index="23" data-type="text">
+                  <button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-start" data-index="24" data-type="text">
                     Motivo <span class="sort-indicator"></span>
                   </button>
                 </th>
                 <th class="text-end" data-type="number">
-                  <button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="24" data-type="number">
+                  <button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="25" data-type="number">
                     Etapa <span class="sort-indicator"></span>
                   </button>
                 </th>
                 <th data-type="text">
-                  <button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-start" data-index="25" data-type="text">
+                  <button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-start" data-index="26" data-type="text">
                     Setor <span class="sort-indicator"></span>
                   </button>
                 </th>
@@ -585,16 +593,19 @@
                   <input class="form-control form-control-sm column-filter" data-index="21" data-type="percent" placeholder=">=0" title="Use >, <, <=, >= para comparar">
                 </th>
                 <th>
-                  <input class="form-control form-control-sm column-filter" data-index="22" data-type="text" placeholder="filtrar">
+                  <input class="form-control form-control-sm column-filter" data-index="22" data-type="number" placeholder=">=0" title="Use >, <, <=, >= para comparar">
                 </th>
                 <th>
                   <input class="form-control form-control-sm column-filter" data-index="23" data-type="text" placeholder="filtrar">
                 </th>
                 <th>
-                  <input class="form-control form-control-sm column-filter" data-index="24" data-type="number" placeholder=">=0" title="Use >, <, <=, >= para comparar">
+                  <input class="form-control form-control-sm column-filter" data-index="24" data-type="text" placeholder="filtrar">
                 </th>
                 <th>
-                  <input class="form-control form-control-sm column-filter" data-index="25" data-type="text" placeholder="filtrar">
+                  <input class="form-control form-control-sm column-filter" data-index="25" data-type="number" placeholder=">=0" title="Use >, <, <=, >= para comparar">
+                </th>
+                <th>
+                  <input class="form-control form-control-sm column-filter" data-index="26" data-type="text" placeholder="filtrar">
                 </th>
               </tr>
             </thead>
@@ -667,6 +678,13 @@
                   <td class="text-end">
                     {% if row.cresc_rec_5a is not none %}
                       {{ '%.2f'|format(row.cresc_rec_5a) }}%
+                    {% else %}
+                      -
+                    {% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if row.peg_ratio is not none %}
+                      {{ '%.2f'|format(row.peg_ratio) }}
                     {% else %}
                       -
                     {% endif %}
