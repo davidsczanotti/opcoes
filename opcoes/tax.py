@@ -31,7 +31,7 @@ def compute_tax(month: int, year: int) -> TaxSummary:
     cur.execute(
         """
         SELECT trade_type, trade_date, qty, entry_price, fees, partial_date, partial_price, partial_qty,
-               exit_date, exit_price, irrf
+               exit_date, exit_price, irrf, side
         FROM positions
         """
     )
@@ -51,6 +51,9 @@ def compute_tax(month: int, year: int) -> TaxSummary:
         exit_date = row[8]
         exit_price = row[9]
         irrf_value = float(row[10] or 0.0)
+        side_raw = row[11] if len(row) > 11 else None
+        side = (side_raw or "long").strip().lower()
+        direction = -1 if side in {"short", "vendida", "vendido", "v"} else 1
 
         def same_month(date_str: str) -> bool:
             if not date_str or len(date_str) < 7:
@@ -59,7 +62,7 @@ def compute_tax(month: int, year: int) -> TaxSummary:
             return int(parts[0]) == year and int(parts[1]) == month
 
         if partial_qty and partial_price is not None and same_month(str(partial_date)):
-            gain = (float(partial_price) - entry) * partial_qty
+            gain = direction * (float(partial_price) - entry) * partial_qty
             if trade_type == "daytrade":
                 daytrade_gain += gain
             else:
@@ -67,7 +70,7 @@ def compute_tax(month: int, year: int) -> TaxSummary:
 
         open_qty = max(qty - (partial_qty or 0), 0)
         if exit_price is not None and same_month(str(exit_date)) and open_qty > 0:
-            gain = (float(exit_price) - entry) * open_qty - fees
+            gain = direction * (float(exit_price) - entry) * open_qty - fees
             if trade_type == "daytrade":
                 daytrade_gain += gain
             else:

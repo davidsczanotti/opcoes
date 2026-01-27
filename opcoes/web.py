@@ -462,7 +462,11 @@ def create_app() -> Flask:
             fees = _auto_fees(ticker=ticker, underlying=underlying or ticker, qty=qty, entry_price=entry_price)
         parent_raw = form.get("parent_position_id")
         parent_id = int(parent_raw) if parent_raw and parent_raw.strip() else None
-        
+        side_raw = (form.get("side") or "").strip()
+        if not side_raw:
+            # Se marcou prêmio, assume venda (short). Caso contrário, default long.
+            side_raw = "short" if form.get("record_premium") == "1" else "long"
+
         pos_id = add_position(
             ticker=ticker,
             underlying=underlying,
@@ -471,6 +475,7 @@ def create_app() -> Flask:
             entry_price=entry_price,
             fees=fees,
             trade_type=form.get("trade_type", "swing"),
+            side=side_raw,
             irrf=float(form["irrf"]) if form.get("irrf") else None,
             notes=form.get("notes") or None,
             is_simulated=is_simulated,
@@ -592,20 +597,22 @@ def create_app() -> Flask:
                 parent_id = int(form.get("parent_position_id"))
             except ValueError:
                 parent_id = None
+        side_raw = form.get("side") or None
         update_position(
             position_id=position_id,
             trade_date=form.get("trade_date") or None,
             qty=int(form["qty"]) if form.get("qty") else None,
-            entry_price=float(form["entry_price"]) if form.get("entry_price") else None,
-            fees=float(form["fees"]) if form.get("fees") else None,
+            entry_price=_parse_form_float(form.get("entry_price")) if form.get("entry_price") else None,
+            fees=_parse_form_float(form.get("fees")) if form.get("fees") else None,
             status=status,
             exit_date=form.get("exit_date") or None,
-            exit_price=float(form["exit_price"]) if form.get("exit_price") else None,
+            exit_price=_parse_form_float(form.get("exit_price")) if form.get("exit_price") else None,
             notes=form.get("notes") or None,
             trade_type=form.get("trade_type") or None,
-            irrf=float(form["irrf"]) if form.get("irrf") else None,
+            side=side_raw,
+            irrf=_parse_form_float(form.get("irrf")) if form.get("irrf") else None,
             partial_date=form.get("partial_date") or None,
-            partial_price=float(form["partial_price"]) if form.get("partial_price") else None,
+            partial_price=_parse_form_float(form.get("partial_price")) if form.get("partial_price") else None,
             partial_qty=int(form["partial_qty"]) if form.get("partial_qty") else None,
             exit_reason=form.get("exit_reason") or None,
             is_simulated=is_simulated,

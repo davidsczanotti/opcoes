@@ -38,6 +38,7 @@ def _ensure_tables(conn: sqlite3.Connection, *, commit: bool) -> None:
             entry_price REAL NOT NULL,
             fees REAL DEFAULT 0,
             trade_type TEXT DEFAULT 'swing',
+            side TEXT DEFAULT 'long',
             irrf REAL,
             status TEXT NOT NULL DEFAULT 'open',
             exit_date TEXT,
@@ -68,6 +69,7 @@ def _ensure_position_columns(conn: sqlite3.Connection) -> None:
         "partial_qty": "INTEGER",
         "exit_reason": "TEXT",
         "trade_type": "TEXT",
+        "side": "TEXT DEFAULT 'long'",
         "irrf": "REAL",
         "is_simulated": "INTEGER DEFAULT 0",
         "parent_position_id": "INTEGER",
@@ -82,6 +84,13 @@ def _normalize_ticker(value: str) -> str:
     return (value or "").strip().upper()
 
 
+def _normalize_side(value: Optional[str]) -> str:
+    text = (value or "").strip().lower()
+    if text in {"short", "vendida", "vendido", "v"}:
+        return "short"
+    return "long"
+
+
 def add_position(
     *,
     ticker: str,
@@ -91,6 +100,7 @@ def add_position(
     entry_price: float,
     fees: float = 0.0,
     trade_type: str = "swing",
+    side: str = "long",
     irrf: Optional[float] = None,
     notes: Optional[str] = None,
     partial_date: Optional[str] = None,
@@ -114,6 +124,7 @@ def add_position(
             entry_price,
             fees,
             trade_type,
+            side,
             irrf,
             notes,
             partial_date,
@@ -134,6 +145,7 @@ def add_position(
             float(entry_price),
             float(fees or 0.0),
             trade_type,
+            _normalize_side(side),
             float(irrf) if irrf is not None else None,
             notes,
             partial_date,
@@ -199,6 +211,7 @@ def update_position(
     partial_qty: Optional[int] = None,
     exit_reason: Optional[str] = None,
     trade_type: Optional[str] = None,
+    side: Optional[str] = None,
     irrf: Optional[float] = None,
     is_simulated: Optional[bool] = None,
     parent_position_id: Optional[int] = None,
@@ -246,6 +259,9 @@ def update_position(
     if trade_type is not None:
         fields.append("trade_type = ?")
         params.append(trade_type)
+    if side is not None:
+        fields.append("side = ?")
+        params.append(_normalize_side(side))
     if irrf is not None:
         fields.append("irrf = ?")
         params.append(float(irrf))
@@ -419,7 +435,11 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     partial_date = row["partial_date"] if "partial_date" in row.keys() else None
     exit_reason = row["exit_reason"] if "exit_reason" in row.keys() else None
     last_price = parse_decimal(row["last_price_raw"])
-    open_qty = max(qty - partial_qty, 0)
+    status = (row["status"] or "").strip().lower()
+    is_closed = status == "closed"
+    open_qty_raw = max(qty - partial_qty, 0)
+    open_qty = 0 if is_closed else open_qty_raw
+    exit_price = parse_decimal(row["exit_price"]) if "exit_price" in row.keys() else None
 
     is_sim_raw = 0
     if "is_simulated" in row.keys():
@@ -428,13 +448,31 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
         except (TypeError, ValueError):
             is_sim_raw = 0
 
+    raw_side = row["side"] if "side" in row.keys() else None
+    side = _normalize_side(raw_side)
+    if (raw_side is None or str(raw_side).strip() == ""):
+        try:
+            strat = (row["strategy_tag"] or "").strip().lower()
+            ticker = (row["ticker"] or "").strip().upper()
+            underlying = (row["underlying"] or "").strip().upper()
+            if strat in {"cash_put", "covered_call"} and ticker and underlying and ticker != underlying:
+                side = "short"
+        except Exception:
+            pass
+    direction = -1 if side == "short" else 1
+
+    def _calc_pl(price: float, qty_val: int) -> float:
+        return direction * (float(price) - float(entry_price)) * int(qty_val)
+
     realized_pl = None
     if partial_qty and partial_price is not None:
-        realized_pl = (partial_price - entry_price) * partial_qty
+        realized_pl = _calc_pl(partial_price, partial_qty)
+    if is_closed and exit_price is not None and open_qty_raw > 0:
+        realized_pl = (realized_pl or 0.0) + _calc_pl(exit_price, open_qty_raw)
 
     pl_open = None
-    if last_price is not None and entry_price and open_qty > 0:
-        pl_open = (last_price - entry_price) * open_qty
+    if not is_closed and last_price is not None and entry_price and open_qty > 0:
+        pl_open = _calc_pl(last_price, open_qty)
 
     pl = None
     if realized_pl is not None or pl_open is not None:
@@ -448,10 +486,8 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     breakeven = None
     if open_qty > 0:
         # preço tal que PL total (realizado + aberto - fees) = 0
-        be_price = entry_price
         numerator = (realized_pl or 0.0) - fees
-        be_price = entry_price - (numerator / open_qty)
-        breakeven = be_price
+        breakeven = entry_price - (direction * (numerator / open_qty))
 
     underlying_price = None
     extrinsic_pct_spot = None
@@ -476,6 +512,9 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
         "entry_price": entry_price,
         "fees": fees,
         "status": row["status"],
+        "side": side,
+        "exit_date": row["exit_date"] if "exit_date" in row.keys() else None,
+        "exit_price": exit_price,
         "notes": row["notes"] or "",
         "last_snapshot_date": row["last_snapshot_date"],
         "last_price": last_price,

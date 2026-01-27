@@ -153,16 +153,22 @@ def parse_args() -> argparse.Namespace:
         help="Ao usar Status Invest, preencher apenas para Units (ignora demais).",
     )
 
-    pc = sub.add_parser("position", help="Gerencia posições compradas")
+    pc = sub.add_parser("position", help="Gerencia posições compradas/vendidas")
     pcs = pc.add_subparsers(dest="subcmd", required=True)
 
-    pa = pcs.add_parser("add", help="Registra uma nova posição (compra)")
+    pa = pcs.add_parser("add", help="Registra uma nova posição (compra/venda)")
     pa.add_argument("--ticker", required=True, help="Ticker da opção (ex.: USIMJ605)")
     pa.add_argument("--underlying", required=True, help="Ticker do ativo base (ex.: USIM5)")
     pa.add_argument("--trade-date", required=True, help="Data da compra (YYYY-MM-DD)")
     pa.add_argument("--qty", type=int, required=True, help="Quantidade de contratos")
-    pa.add_argument("--price", type=float, required=True, help="Preço pago por contrato")
+    pa.add_argument("--price", type=float, required=True, help="Preço por contrato")
     pa.add_argument("--fees", type=float, default=0.0, help="Custos/Taxas adicionais (opcional)")
+    pa.add_argument(
+        "--side",
+        choices=["long", "short"],
+        default="long",
+        help="Direção da posição: long (comprada) ou short (vendida).",
+    )
     pa.add_argument("--notes", default=None, help="Observações (opcional)")
     pa.add_argument(
         "--parent-id",
@@ -375,6 +381,7 @@ def main() -> None:
                 qty=args.qty,
                 entry_price=args.price,
                 fees=args.fees,
+                side=args.side,
                 notes=args.notes,
                 is_simulated=bool(getattr(args, "simulated", False)),
                 parent_position_id=getattr(args, "parent_id", None),
