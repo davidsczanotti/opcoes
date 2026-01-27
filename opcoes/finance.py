@@ -2,7 +2,7 @@ import sqlite3
 import datetime as dt
 from dataclasses import dataclass
 from enum import Enum
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from .config import get_db_path
 
@@ -180,6 +180,171 @@ def get_transactions(limit: int = 50) -> List[Transaction]:
         ]
     finally:
         conn.close()
+
+
+def get_ledger_sums_by_position(
+    *,
+    types: Optional[List[TransactionType]] = None,
+    is_simulated: Optional[bool] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> Dict[int, Dict[str, float]]:
+    db, owns_conn = _resolve_conn(conn)
+    try:
+        where: list[str] = ["position_id IS NOT NULL"]
+        params: list[object] = []
+        if types:
+            placeholders = ",".join("?" for _ in types)
+            where.append(f"type IN ({placeholders})")
+            params.extend([t.value if isinstance(t, TransactionType) else str(t) for t in types])
+        if is_simulated is not None:
+            where.append("COALESCE(is_simulated, 0) = ?")
+            params.append(1 if is_simulated else 0)
+
+        query = f"""
+            SELECT position_id, type, SUM(amount) AS total
+            FROM ledger
+            WHERE {' AND '.join(where)}
+            GROUP BY position_id, type
+        """
+        rows = db.execute(query, params).fetchall()
+        result: Dict[int, Dict[str, float]] = {}
+        for r in rows:
+            pid = int(r["position_id"])
+            if pid not in result:
+                result[pid] = {}
+            result[pid][str(r["type"])] = float(r["total"] or 0.0)
+        return result
+    finally:
+        if owns_conn:
+            db.close()
+
+
+def recalc_position_premium_and_darf(
+    *,
+    position_id: int,
+    trade_date: str,
+    ticker: str,
+    qty: int,
+    premium_amount: float,
+    trade_type: str,
+    is_simulated: bool,
+    conn: Optional[sqlite3.Connection] = None,
+) -> Dict[str, float]:
+    """Recalcula (upsert) prêmio e DARF vinculados a uma posição."""
+    db, owns_conn = _resolve_conn(conn)
+    try:
+        cur = db.execute(
+            """
+            SELECT id, type
+            FROM ledger
+            WHERE position_id = ? AND type IN (?, ?)
+            ORDER BY id ASC
+            """,
+            (int(position_id), TransactionType.PREMIUM.value, TransactionType.DARF.value),
+        )
+        rows = cur.fetchall()
+        by_type: Dict[str, List[int]] = {TransactionType.PREMIUM.value: [], TransactionType.DARF.value: []}
+        for r in rows:
+            by_type[str(r["type"])].append(int(r["id"]))
+
+        # PREMIUM
+        if premium_amount > 0:
+            if by_type[TransactionType.PREMIUM.value]:
+                tx_id = by_type[TransactionType.PREMIUM.value][0]
+                db.execute(
+                    """
+                    UPDATE ledger
+                    SET date = ?, amount = ?, description = ?, is_simulated = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        trade_date,
+                        float(premium_amount),
+                        f"Prêmio {ticker} ({int(qty)}x)",
+                        1 if is_simulated else 0,
+                        tx_id,
+                    ),
+                )
+                extra_ids = by_type[TransactionType.PREMIUM.value][1:]
+                if extra_ids:
+                    db.execute(
+                        f"DELETE FROM ledger WHERE id IN ({','.join('?' for _ in extra_ids)})",
+                        extra_ids,
+                    )
+            else:
+                add_transaction(
+                    date=trade_date,
+                    type=TransactionType.PREMIUM,
+                    amount=float(premium_amount),
+                    description=f"Prêmio {ticker} ({int(qty)}x)",
+                    position_id=position_id,
+                    is_simulated=is_simulated,
+                    conn=db,
+                )
+        else:
+            ids = by_type[TransactionType.PREMIUM.value]
+            if ids:
+                db.execute(
+                    f"DELETE FROM ledger WHERE id IN ({','.join('?' for _ in ids)})",
+                    ids,
+                )
+
+        # DARF
+        aliquota_opts = 0.20 if "day" in (trade_type or "").lower() else 0.15
+        base_ir = max(0.0, float(premium_amount))
+        darf_amount = -round(base_ir * aliquota_opts, 2) if base_ir > 0 else 0.0
+
+        if darf_amount != 0.0:
+            if by_type[TransactionType.DARF.value]:
+                tx_id = by_type[TransactionType.DARF.value][0]
+                db.execute(
+                    """
+                    UPDATE ledger
+                    SET date = ?, amount = ?, description = ?, is_simulated = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        trade_date,
+                        float(darf_amount),
+                        f"Provisão DARF {ticker} ({int(aliquota_opts*100)}%)",
+                        1 if is_simulated else 0,
+                        tx_id,
+                    ),
+                )
+                extra_ids = by_type[TransactionType.DARF.value][1:]
+                if extra_ids:
+                    db.execute(
+                        f"DELETE FROM ledger WHERE id IN ({','.join('?' for _ in extra_ids)})",
+                        extra_ids,
+                    )
+            else:
+                add_transaction(
+                    date=trade_date,
+                    type=TransactionType.DARF,
+                    amount=float(darf_amount),
+                    description=f"Provisão DARF {ticker} ({int(aliquota_opts*100)}%)",
+                    position_id=position_id,
+                    is_simulated=is_simulated,
+                    conn=db,
+                )
+        else:
+            ids = by_type[TransactionType.DARF.value]
+            if ids:
+                db.execute(
+                    f"DELETE FROM ledger WHERE id IN ({','.join('?' for _ in ids)})",
+                    ids,
+                )
+
+        if owns_conn:
+            db.commit()
+
+        return {
+            "premium": float(premium_amount),
+            "darf": float(darf_amount),
+        }
+    finally:
+        if owns_conn:
+            db.close()
 
 
 def get_premium_position_ids(position_ids: Optional[List[int]] = None) -> set[int]:

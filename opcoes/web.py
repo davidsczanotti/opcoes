@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime
 import sqlite3
 from pathlib import Path
+from typing import Optional
 
 from flask import Flask, redirect, render_template, request, url_for
 
@@ -445,6 +446,137 @@ def create_app() -> Flask:
             next_url=next_url,
         )
 
+    @app.route("/audit")
+    def audit_view() -> str:
+        mode = (request.args.get("mode") or "real").strip().lower()
+        include_closed = (request.args.get("include_closed") or "1") == "1"
+
+        is_simulated: Optional[bool]
+        if mode == "simulated":
+            is_simulated = True
+        elif mode == "all":
+            is_simulated = None
+        else:
+            mode = "real"
+            is_simulated = False
+
+        positions_all = list_positions(include_closed=True)
+        if is_simulated is not None:
+            positions_all = [p for p in positions_all if bool(p.get("is_simulated")) == is_simulated]
+
+        ledger_sums = finance.get_ledger_sums_by_position(
+            types=[finance.TransactionType.PREMIUM, finance.TransactionType.DARF],
+            is_simulated=is_simulated,
+        )
+
+        rows = []
+        totals = {
+            "expected_premium": 0.0,
+            "expected_darf": 0.0,
+            "actual_premium": 0.0,
+            "actual_darf": 0.0,
+            "expected_net": 0.0,
+            "actual_net": 0.0,
+        }
+
+        for pos in positions_all:
+            if not include_closed and (pos.get("status") or "").strip().lower() == "closed":
+                continue
+
+            pid = int(pos.get("id") or 0)
+            ticker = (pos.get("ticker") or "").strip()
+            underlying = (pos.get("underlying") or "").strip()
+            is_option = bool(ticker and underlying and ticker.upper() != underlying.upper())
+            side = (pos.get("side") or "").strip().lower()
+            trade_type = (pos.get("trade_type") or "swing").strip().lower()
+            entry_price = float(pos.get("entry_price") or 0.0)
+            qty = int(pos.get("qty") or 0)
+            fees = float(pos.get("fees") or 0.0)
+
+            expected_premium = None
+            expected_darf = None
+            if is_option and side == "short":
+                expected_premium = (entry_price * qty) - fees
+                aliquota = 0.20 if "day" in trade_type else 0.15
+                base_ir = max(0.0, float(expected_premium))
+                expected_darf = -round(base_ir * aliquota, 2) if base_ir > 0 else 0.0
+
+            actual_premium = ledger_sums.get(pid, {}).get(finance.TransactionType.PREMIUM.value)
+            actual_darf = ledger_sums.get(pid, {}).get(finance.TransactionType.DARF.value)
+
+            if expected_premium is None and actual_premium is None and actual_darf is None:
+                continue
+
+            expected_net = None
+            actual_net = None
+            if expected_premium is not None or expected_darf is not None:
+                expected_net = float(expected_premium or 0.0) + float(expected_darf or 0.0)
+            if actual_premium is not None or actual_darf is not None:
+                actual_net = float(actual_premium or 0.0) + float(actual_darf or 0.0)
+
+            rows.append(
+                {
+                    "id": pid,
+                    "ticker": ticker,
+                    "underlying": underlying,
+                    "side": side,
+                    "status": pos.get("status"),
+                    "qty": qty,
+                    "entry_price": entry_price,
+                    "fees": fees,
+                    "trade_type": trade_type,
+                    "expected_premium": expected_premium,
+                    "expected_darf": expected_darf,
+                    "actual_premium": actual_premium,
+                    "actual_darf": actual_darf,
+                    "diff_premium": (actual_premium or 0.0) - (expected_premium or 0.0)
+                    if expected_premium is not None or actual_premium is not None
+                    else None,
+                    "diff_darf": (actual_darf or 0.0) - (expected_darf or 0.0)
+                    if expected_darf is not None or actual_darf is not None
+                    else None,
+                    "expected_net": expected_net,
+                    "actual_net": actual_net,
+                    "diff_net": (actual_net or 0.0) - (expected_net or 0.0)
+                    if expected_net is not None or actual_net is not None
+                    else None,
+                }
+            )
+
+            if expected_premium is not None:
+                totals["expected_premium"] += float(expected_premium or 0.0)
+            if expected_darf is not None:
+                totals["expected_darf"] += float(expected_darf or 0.0)
+            if actual_premium is not None:
+                totals["actual_premium"] += float(actual_premium or 0.0)
+            if actual_darf is not None:
+                totals["actual_darf"] += float(actual_darf or 0.0)
+
+        totals["expected_net"] = totals["expected_premium"] + totals["expected_darf"]
+        totals["actual_net"] = totals["actual_premium"] + totals["actual_darf"]
+
+        position_ids = {int(p.get("id") or 0) for p in positions_all}
+        orphan_rows = [
+            {
+                "id": pid,
+                "actual_premium": sums.get(finance.TransactionType.PREMIUM.value),
+                "actual_darf": sums.get(finance.TransactionType.DARF.value),
+                "actual_net": (sums.get(finance.TransactionType.PREMIUM.value) or 0.0)
+                + (sums.get(finance.TransactionType.DARF.value) or 0.0),
+            }
+            for pid, sums in ledger_sums.items()
+            if pid not in position_ids
+        ]
+
+        return render_template(
+            "audit.html",
+            rows=rows,
+            totals=totals,
+            mode=mode,
+            include_closed=include_closed,
+            orphan_rows=orphan_rows,
+        )
+
     @app.post("/positions/add")
     def add_position_view():
         form = request.form
@@ -582,6 +714,54 @@ def create_app() -> Flask:
                     is_simulated=is_simulated,
                 )
 
+        return redirect(next_url)
+
+    @app.post("/positions/recalc-premium/<int:position_id>")
+    def recalc_position_premium(position_id: int):
+        next_url = _safe_next_url(request.form.get("next")) or url_for("positions")
+        pos = get_position(position_id)
+        if not pos:
+            return redirect(next_url)
+
+        ticker = (pos.get("ticker") or "").strip()
+        underlying = (pos.get("underlying") or "").strip()
+        if not ticker or not underlying or ticker.upper() == underlying.upper():
+            return redirect(next_url)
+
+        side = (pos.get("side") or "").strip().lower()
+        if side != "short":
+            return redirect(next_url)
+
+        try:
+            entry_price = float(pos.get("entry_price") or 0.0)
+        except (TypeError, ValueError):
+            entry_price = 0.0
+        try:
+            qty = int(pos.get("qty") or 0)
+        except (TypeError, ValueError):
+            qty = 0
+        try:
+            fees = float(pos.get("fees") or 0.0)
+        except (TypeError, ValueError):
+            fees = 0.0
+
+        if entry_price <= 0 or qty <= 0:
+            return redirect(next_url)
+
+        total_premium = (entry_price * qty) - fees
+        trade_date = pos.get("trade_date") or datetime.date.today().isoformat()
+        trade_type = (pos.get("trade_type") or "swing").strip().lower()
+        is_simulated = bool(pos.get("is_simulated") or 0)
+
+        finance.recalc_position_premium_and_darf(
+            position_id=position_id,
+            trade_date=trade_date,
+            ticker=ticker,
+            qty=qty,
+            premium_amount=total_premium,
+            trade_type=trade_type,
+            is_simulated=is_simulated,
+        )
         return redirect(next_url)
 
     @app.post("/positions/update/<int:position_id>")

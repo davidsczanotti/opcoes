@@ -37,6 +37,7 @@
           <a class="nav-link" href="/cash-covered-put">Cash-Covered Put</a>
           <a class="nav-link" href="/fundamentus">Fundamentus</a>
           <a class="nav-link" href="/darf">DARF</a>
+          <a class="nav-link" href="/audit">Auditoria</a>
           <a class="nav-link" href="/settings">Configurações</a>
         </div>
       </div>
@@ -359,6 +360,17 @@
                               Registrar prêmio
                             </button>
                           {% endif %}
+                          {% if pos.side == 'short' %}
+                            <button
+                              class="btn btn-outline-warning btn-sm"
+                              type="submit"
+                              formaction="/positions/recalc-premium/{{ pos.id }}"
+                              formmethod="post"
+                              onclick="return confirm('Recalcular prêmio/DARF de {{ pos.ticker }} com base em preço, qtd e taxas?');"
+                            >
+                              Recalcular prêmio/DARF
+                            </button>
+                          {% endif %}
                         {% endif %}
                       </div>
                       <div class="mb-1">
@@ -367,6 +379,12 @@
                         <input name="exit_price" type="number" step="0.01" class="form-control form-control-sm text-end" placeholder="Preço saída" value="{{ pos.exit_price or '' }}">
                         <input name="fees" type="number" step="0.01" class="form-control form-control-sm text-end" placeholder="Taxas" value="{{ pos.fees or '' }}">
                         <input name="notes" class="form-control form-control-sm" placeholder="Notas" value="{{ pos.notes }}">
+                        {% set premium_total = (pos.entry_price or 0) * (pos.qty or 0) %}
+                        {% if pos.side == 'short' and premium_total > 0 and (pos.fees or 0) / premium_total > 0.10 %}
+                          <div class="text-danger small mt-1">
+                            Taxas altas vs prêmio. Para prêmio/DARF use só taxas da venda (não inclua recompra).
+                          </div>
+                        {% endif %}
                       </div>
                       <div>
                         <button
