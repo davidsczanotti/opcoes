@@ -51,6 +51,12 @@ def _is_put_option_position(pos: Mapping[str, Any]) -> bool:
     ticker = (pos.get("ticker") or "").strip().upper()
     if not ticker:
         return False
+    side = (pos.get("side") or "").strip().lower()
+    strategy_tag = (pos.get("strategy_tag") or "").strip().lower()
+    if side == "long":
+        return False
+    if side != "short" and strategy_tag != "cash_put":
+        return False
     if infer_option_type(ticker) != "PUT":
         return False
     underlying = (pos.get("underlying") or "").strip().upper()

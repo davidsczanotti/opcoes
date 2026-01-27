@@ -23,6 +23,13 @@ class TaxSummary:
 def compute_tax(month: int, year: int) -> TaxSummary:
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
+    try:
+        cols = {row[1] for row in cur.execute('PRAGMA table_info("positions")').fetchall()}
+        if "side" not in cols:
+            cur.execute('ALTER TABLE positions ADD COLUMN "side" TEXT DEFAULT \'long\'')
+            conn.commit()
+    except sqlite3.Error:
+        pass
     swing_gain = 0.0
     daytrade_gain = 0.0
     swing_irrf = 0.0

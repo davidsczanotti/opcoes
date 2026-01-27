@@ -24,6 +24,15 @@ def _get_float_arg(args: Mapping[str, Any], name: str, default: float) -> float:
         return default
 
 
+def _is_short_strategy_position(pos: Dict, strategy_tag: str) -> bool:
+    side = (pos.get("side") or "").strip().lower()
+    if side == "long":
+        return False
+    if side == "short":
+        return True
+    return (pos.get("strategy_tag") or "").strip().lower() == strategy_tag
+
+
 def _bova_coverage(positions: List[Dict], underlying: str) -> Tuple[Dict[str, Any], List[Dict], List[Dict]]:
     """Replica a lógica original de _bova_coverage de web.py.
 
@@ -48,6 +57,7 @@ def _bova_coverage(positions: List[Dict], underlying: str) -> Tuple[Dict[str, An
         if (p.get("underlying") or "").strip().upper() == underlying
         and (p.get("ticker") or "").strip().upper() != underlying
         and infer_option_type(p.get("ticker")) == "CALL"
+        and _is_short_strategy_position(p, "covered_call")
     ]
 
     # Ordena lotes e calls por data (FIFO)

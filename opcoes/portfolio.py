@@ -53,6 +53,7 @@ def _ensure_tables(conn: sqlite3.Connection, *, commit: bool) -> None:
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_positions_ticker ON positions (ticker)")
     _ensure_position_columns(conn)
+    _migrate_strategy_sides(conn)
     if commit:
         conn.commit()
 
@@ -78,6 +79,23 @@ def _ensure_position_columns(conn: sqlite3.Connection) -> None:
     for col, col_type in columns.items():
         if col not in existing:
             conn.execute(f'ALTER TABLE positions ADD COLUMN "{col}" {col_type}')
+
+
+def _migrate_strategy_sides(conn: sqlite3.Connection) -> None:
+    """Marca como vendidas posições de estratégia short (cash_put/covered_call)."""
+    try:
+        conn.execute(
+            """
+            UPDATE positions
+            SET side = 'short'
+            WHERE LOWER(COALESCE(side, '')) != 'short'
+              AND strategy_tag IN ('cash_put', 'covered_call')
+              AND UPPER(COALESCE(ticker, '')) != UPPER(COALESCE(underlying, ''))
+            """
+        )
+    except sqlite3.Error:
+        # Evita quebrar o fluxo em bancos antigos/parciais.
+        return
 
 
 def _normalize_ticker(value: str) -> str:
