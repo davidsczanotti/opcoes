@@ -105,6 +105,17 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Não roda o backfill de preços após o scrape.",
     )
+    sc.add_argument(
+        "--resume",
+        action="store_true",
+        help="Retoma uma coleta interrompida usando checkpoint incremental.",
+    )
+    sc.add_argument(
+        "--resume-file",
+        type=Path,
+        default=None,
+        help="Arquivo de progresso da retomada (default: <output>.progress.json).",
+    )
 
     ec = sub.add_parser("enrich", help="Enriquece um CSV existente com E/P e P/L")
     ec.add_argument(
@@ -348,6 +359,8 @@ def main() -> None:
                 proxy_settings=proxy_settings,
                 fundamentals_csv=args.fundamentals,
                 use_status_invest=use_status_invest,
+                resume=bool(getattr(args, "resume", False)),
+                progress_path=getattr(args, "resume_file", None),
             )
         )
         # Opcionalmente, roda backfill de preços para viabilizar HV/IV Rank

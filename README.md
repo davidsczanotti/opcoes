@@ -52,8 +52,17 @@ poetry run python -m opcoes.cli scrape --symbols ABEV3,BBAS3 --max-symbols 20
 ```
 - Definir output, headful, timeout e proxy:
 ```bash
-poetry run python -m opcoes.cli scrape --output data/opcoes_latest.csv --headful --goto-timeout 90000 --proxy-server http://usuario:senha@proxy:3128
+poetry run python -m opcoes.cli scrape --output data/opcoes_latest.csv --headful --goto-timeout 90000 --proxy-server http://proxy:3128 --proxy-username usuario --proxy-password senha
 ```
+- Retomar coleta interrompida (checkpoint):
+```bash
+poetry run python -m opcoes.cli scrape --resume
+```
+Opcional: `--resume-file caminho/para/progresso.json`. O scraper cria `<output>.progress.json` e `<output>.checkpoint.csv` e remove ambos ao final com sucesso.
+Regras da retomada:
+- O `--resume` só é reaproveitado se `--output` e a lista de símbolos forem iguais à execução original.
+- Se mudar `--symbols`, `--max-symbols` ou `--output`, o scraper ignora o checkpoint e inicia do zero.
+- Se o checkpoint de linhas estiver vazio, ele reinicia a coleta completa por segurança.
 - Backfill de preços (HV/IV Rank):
 ```bash
 poetry run python -m opcoes.cli scrape --backfill-days 120
@@ -95,7 +104,7 @@ Por padrão persiste ranking do dia; use `--no-persist` para pular.
 ### Posições
 - Adicionar posição:
 ```bash
-poetry run python -m opcoes.cli position add --ticker B3SAB150 --underlying B3SA3 --qty 100 --entry-price 0.35 --trade-date 2025-01-01
+poetry run python -m opcoes.cli position add --ticker B3SAB150 --underlying B3SA3 --qty 100 --price 0.35 --trade-date 2025-01-01
 ```
 - Listar posições:
 ```bash
@@ -167,6 +176,7 @@ Páginas principais:
 - `data/opcoes_snapshots.db`: snapshots, posições, rankings e histórico.
 - `data/iv_history.db`: histórico de IV.
 - `data/flow_history.db`: histórico de fluxo.
+- `data/opcoes_latest.progress.json` e `data/opcoes_latest.checkpoint.csv`: criados automaticamente quando usa `--resume`.
 
 ## Variáveis de ambiente
 - `OPCOES_DB_PATH`: define outro caminho para o SQLite (default: `data/opcoes_snapshots.db`).

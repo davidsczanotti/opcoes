@@ -38,6 +38,14 @@ from .ivrank import IVRankStore
 from .activity import FlowStore
 from .snapshots import SnapshotDB
 from .far_expirations import fetch_far_expiration_quotes
+from .progress import (
+    PROGRESS_VERSION,
+    default_checkpoint_path,
+    default_progress_path,
+    load_checkpoint_rows,
+    load_progress,
+    save_progress,
+)
 from ..utils import infer_option_type, format_decimal as _format_decimal
 from .. import quant
 from .health import check_health
@@ -60,12 +68,44 @@ async def scrape_all(
     proxy_settings: Optional[Dict[str, str]] = None,
     fundamentals_csv: Optional[Path] = None,
     use_status_invest: bool = False,
+    resume: bool = False,
+    progress_path: Optional[Path] = None,
 ) -> None:
     output_csv = Path(output_csv)
     existing_tickers = load_existing_tickers(output_csv)
     rows_to_write: List[Dict[str, str]] = []
     rows_to_write_tickers: Set[str] = set()
+    progress: Optional[Dict[str, object]] = None
+    processed_symbols: Set[str] = set()
+    processed_symbols_list: List[str] = []
+    progress_file: Optional[Path] = None
+    checkpoint_file: Optional[Path] = None
+    checkpoint_existing_tickers: Set[str] = set()
+    resume_snapshot_date: Optional[str] = None
+    snapshot_rows: List[Dict[str, str]] = []
     fundamentals_map: Dict[str, tuple] = {}
+
+    def _track_row(row: Dict[str, str]) -> bool:
+        ticker = str(row.get("ticker") or "").strip().upper()
+        if not ticker:
+            return False
+        if ticker in existing_tickers or ticker in rows_to_write_tickers:
+            return False
+        rows_to_write.append(row)
+        rows_to_write_tickers.add(ticker)
+        return True
+
+    def _max_snapshot_date(current: Optional[str], candidate: Optional[str]) -> Optional[str]:
+        if not candidate:
+            return current
+        if not current:
+            return candidate
+        try:
+            current_dt = dt.date.fromisoformat(current)
+            candidate_dt = dt.date.fromisoformat(candidate)
+        except ValueError:
+            return current
+        return max(current_dt, candidate_dt).isoformat()
     async with async_playwright() as p:
         launch_kwargs = {"headless": headless}
         if proxy_settings:
@@ -98,6 +138,73 @@ async def scrape_all(
             await browser.close()
             return
 
+        if resume:
+            progress_file = Path(progress_path) if progress_path else default_progress_path(output_csv)
+            progress = load_progress(progress_file)
+            if progress:
+                if progress.get("version") != PROGRESS_VERSION:
+                    print(
+                        "Aviso: arquivo de retomada em formato antigo. "
+                        "Ignorando checkpoint e iniciando do zero."
+                    )
+                    progress = None
+                else:
+                    saved_output = str(progress.get("output_csv") or "")
+                    expected_output = str(output_csv.resolve())
+                    saved_symbols = progress.get("symbols")
+                    if saved_output and saved_output != expected_output:
+                        print(
+                            "Aviso: arquivo de retomada aponta para outro CSV. "
+                            "Ignorando checkpoint e iniciando do zero."
+                        )
+                        progress = None
+                    elif saved_symbols and list(saved_symbols) != list(target_symbols):
+                        print(
+                            "Aviso: lista de simbolos da retomada nao bate com esta execucao. "
+                            "Ignorando checkpoint e iniciando do zero."
+                        )
+                        progress = None
+            if progress:
+                checkpoint_file = Path(progress.get("checkpoint_csv") or default_checkpoint_path(output_csv))
+                processed_symbols_list = [
+                    s for s in progress.get("processed_symbols", []) if isinstance(s, str)
+                ]
+                processed_symbols = set(processed_symbols_list)
+                snapshot_rows = load_checkpoint_rows(checkpoint_file)
+                if snapshot_rows:
+                    for row in snapshot_rows:
+                        _track_row(row)
+                if processed_symbols and not snapshot_rows:
+                    print(
+                        "Aviso: checkpoint de linhas vazio. A retomada vai coletar tudo novamente."
+                    )
+                    processed_symbols.clear()
+                    processed_symbols_list = []
+                if progress.get("snapshot_date"):
+                    resume_snapshot_date = str(progress.get("snapshot_date"))
+                print(
+                    "Retomando coleta: "
+                    f"{len(processed_symbols)}/{len(target_symbols)} simbolos ja concluidos."
+                )
+            else:
+                checkpoint_file = default_checkpoint_path(output_csv)
+                progress = {
+                    "version": PROGRESS_VERSION,
+                    "output_csv": str(output_csv.resolve()),
+                    "checkpoint_csv": str(checkpoint_file.resolve()),
+                    "symbols": list(target_symbols),
+                    "processed_symbols": [],
+                    "snapshot_date": None,
+                    "started_at": dt.datetime.now().isoformat(timespec="seconds"),
+                    "updated_at": dt.datetime.now().isoformat(timespec="seconds"),
+                }
+                save_progress(progress_file, progress)
+                print(
+                    "Checkpoint ativado. Se o scraper for interrompido, rode novamente com "
+                    f"--resume para continuar. Progresso: {progress_file}"
+                )
+            checkpoint_existing_tickers = load_existing_tickers(checkpoint_file) if checkpoint_file else set()
+
         total_written = 0
         total_symbols = len(target_symbols)
 
@@ -118,6 +225,8 @@ async def scrape_all(
             print(f"Aviso: falhou preço subjacente: {exc}")
             price_map = {}
         snapshot_date = dt.date.today().isoformat()
+        if resume_snapshot_date:
+            snapshot_date = resume_snapshot_date
         iv_store: Optional[IVRankStore] = None
         try:
             iv_store = IVRankStore(Path("data/iv_history.db"))
@@ -136,7 +245,6 @@ async def scrape_all(
         except Exception as exc:  # noqa: BLE001
             print(f"Aviso: falhou snapshots DB: {exc}")
             snapshot_db = None
-        snapshot_rows: List[Dict[str, str]] = []
         far_quotes: Dict[str, dict] = {}
         try:
             far_quotes = fetch_far_expiration_quotes()
@@ -146,6 +254,9 @@ async def scrape_all(
             print(f"Aviso: não foi possível carregar book de vencimentos longos: {exc}")
 
         for idx, symbol in enumerate(target_symbols, start=1):
+            if resume and symbol in processed_symbols:
+                print(f"[{idx}/{total_symbols}] {symbol} ja coletado. Pulando.")
+                continue
             print(f"[{idx}/{total_symbols}] Processando {symbol}…")
             if page.is_closed():
                 page = await context.new_page()
@@ -393,23 +504,31 @@ async def scrape_all(
             snapshot_rows.extend(rows)
             new_for_symbol = 0
             for r in rows:
-                ticker = str(r.get("ticker") or "").strip().upper()
-                if not ticker:
-                    continue
-                if ticker in existing_tickers or ticker in rows_to_write_tickers:
-                    continue
-                rows_to_write.append(r)
-                rows_to_write_tickers.add(ticker)
-                new_for_symbol += 1
+                if _track_row(r):
+                    new_for_symbol += 1
             total_written += new_for_symbol
             print(f"  -> {len(rows)} linhas coletadas (novas: {new_for_symbol}).")
+
+            if resume and progress and progress_file and checkpoint_file:
+                append_rows_dedup(checkpoint_file, rows, checkpoint_existing_tickers)
+                if symbol not in processed_symbols:
+                    processed_symbols.add(symbol)
+                    processed_symbols_list.append(symbol)
+                resume_snapshot_date = _max_snapshot_date(
+                    resume_snapshot_date, _infer_snapshot_date(rows)
+                )
+                progress["processed_symbols"] = processed_symbols_list
+                progress["snapshot_date"] = resume_snapshot_date
+                progress["updated_at"] = dt.datetime.now().isoformat(timespec="seconds")
+                progress["last_symbol"] = symbol
+                save_progress(progress_file, progress)
 
         await browser.close()
         if iv_store:
             iv_store.close()
         if flow_store:
             flow_store.close()
-        detected_snapshot_date = _infer_snapshot_date(snapshot_rows)
+        detected_snapshot_date = _infer_snapshot_date(snapshot_rows) or resume_snapshot_date
         if detected_snapshot_date:
             snapshot_date = detected_snapshot_date
         _apply_execution_penalties(snapshot_rows, snapshot_date)
@@ -421,6 +540,13 @@ async def scrape_all(
         if rows_to_write:
             total_written = append_rows_dedup(output_csv, rows_to_write, existing_tickers)
         print(f"Concluído. Novos registros gravados: {total_written}. Arquivo: {output_csv}")
+
+        if resume and progress_file:
+            with contextlib.suppress(Exception):
+                progress_file.unlink()
+            if checkpoint_file:
+                with contextlib.suppress(Exception):
+                    checkpoint_file.unlink()
 
 
 async def _scrape_symbol(
