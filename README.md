@@ -54,13 +54,11 @@ poetry run python -m opcoes.cli scrape --symbols ABEV3,BBAS3 --max-symbols 20
 ```bash
 poetry run python -m opcoes.cli scrape --output data/opcoes_latest.csv --headful --goto-timeout 90000 --proxy-server http://proxy:3128 --proxy-username usuario --proxy-password senha
 ```
-- Retomar coleta interrompida (checkpoint):
-```bash
-poetry run python -m opcoes.cli scrape --resume
-```
+- Retomar coleta interrompida (checkpoint automatico):
+O scraper agora salva progresso automaticamente e retoma na proxima execucao, sem flag.
 Opcional: `--resume-file caminho/para/progresso.json`. O scraper cria `<output>.progress.json` e `<output>.checkpoint.csv` e remove ambos ao final com sucesso.
 Regras da retomada:
-- O `--resume` só é reaproveitado se `--output` e a lista de símbolos forem iguais à execução original.
+- O checkpoint so e reaproveitado se `--output` e a lista de simbolos forem iguais a execucao original.
 - Se mudar `--symbols`, `--max-symbols` ou `--output`, o scraper ignora o checkpoint e inicia do zero.
 - Se o checkpoint de linhas estiver vazio, ele reinicia a coleta completa por segurança.
 - Backfill de preços (HV/IV Rank):
@@ -176,7 +174,7 @@ Páginas principais:
 - `data/opcoes_snapshots.db`: snapshots, posições, rankings e histórico.
 - `data/iv_history.db`: histórico de IV.
 - `data/flow_history.db`: histórico de fluxo.
-- `data/opcoes_latest.progress.json` e `data/opcoes_latest.checkpoint.csv`: criados automaticamente quando usa `--resume`.
+- `data/opcoes_latest.progress.json` e `data/opcoes_latest.checkpoint.csv`: criados automaticamente para permitir retomada sem perder progresso.
 
 ## Variáveis de ambiente
 - `OPCOES_DB_PATH`: define outro caminho para o SQLite (default: `data/opcoes_snapshots.db`).
@@ -190,6 +188,7 @@ Sem `RUN_E2E_TESTS`, os testes e2e são ignorados.
 
 ## Observações
 - A coleta é sequencial (ritmo humano), pensada para execução diária.
+- Se o navegador fechar durante o scrape, o coletor tenta reiniciar e continuar no mesmo símbolo.
 - Bid/ask podem não estar disponíveis na fonte. Quando ausentes, o app trata como watchlist
   e usa último/preço teórico apenas como referência.
 - O CSV mantém unicidade por `ticker` e normaliza números no padrão pt-BR.

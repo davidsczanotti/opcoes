@@ -108,7 +108,7 @@ def parse_args() -> argparse.Namespace:
     sc.add_argument(
         "--resume",
         action="store_true",
-        help="Retoma uma coleta interrompida usando checkpoint incremental.",
+        help="Usa checkpoint incremental (automatico por padrao).",
     )
     sc.add_argument(
         "--resume-file",

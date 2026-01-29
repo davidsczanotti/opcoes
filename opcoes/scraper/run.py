@@ -68,7 +68,7 @@ async def scrape_all(
     proxy_settings: Optional[Dict[str, str]] = None,
     fundamentals_csv: Optional[Path] = None,
     use_status_invest: bool = False,
-    resume: bool = False,
+    resume: bool = True,
     progress_path: Optional[Path] = None,
 ) -> None:
     output_csv = Path(output_csv)
@@ -84,6 +84,7 @@ async def scrape_all(
     resume_snapshot_date: Optional[str] = None
     snapshot_rows: List[Dict[str, str]] = []
     fundamentals_map: Dict[str, tuple] = {}
+    resume_enabled = True
 
     def _track_row(row: Dict[str, str]) -> bool:
         ticker = str(row.get("ticker") or "").strip().upper()
@@ -115,6 +116,28 @@ async def scrape_all(
         browser = await p.chromium.launch(**launch_kwargs)
         context = await browser.new_context()
         page = await context.new_page()
+
+        async def _reset_browser() -> None:
+            nonlocal browser, context, page
+            with contextlib.suppress(Exception):
+                await browser.close()
+            browser = await p.chromium.launch(**launch_kwargs)
+            context = await browser.new_context()
+            page = await context.new_page()
+            await page.goto(
+                BASE_URL,
+                wait_until="domcontentloaded",
+                timeout=max(goto_timeout_ms, 1000),
+            )
+            await _wait_idle(page)
+            await check_health(page)
+            await _select_all_underlyings(page)
+            await _wait_idle(page)
+
+        def _is_target_closed(exc: Exception) -> bool:
+            msg = str(exc).lower()
+            return "target page" in msg and "closed" in msg
+
         await page.goto(
             BASE_URL,
             wait_until="domcontentloaded",
@@ -138,7 +161,7 @@ async def scrape_all(
             await browser.close()
             return
 
-        if resume:
+        if resume_enabled:
             progress_file = Path(progress_path) if progress_path else default_progress_path(output_csv)
             progress = load_progress(progress_file)
             if progress:
@@ -200,8 +223,8 @@ async def scrape_all(
                 }
                 save_progress(progress_file, progress)
                 print(
-                    "Checkpoint ativado. Se o scraper for interrompido, rode novamente com "
-                    f"--resume para continuar. Progresso: {progress_file}"
+                    "Checkpoint ativado automaticamente. Se o scraper for interrompido, "
+                    f"basta rodar novamente. Progresso: {progress_file}"
                 )
             checkpoint_existing_tickers = load_existing_tickers(checkpoint_file) if checkpoint_file else set()
 
@@ -254,29 +277,31 @@ async def scrape_all(
             print(f"Aviso: não foi possível carregar book de vencimentos longos: {exc}")
 
         for idx, symbol in enumerate(target_symbols, start=1):
-            if resume and symbol in processed_symbols:
+            if resume_enabled and symbol in processed_symbols:
                 print(f"[{idx}/{total_symbols}] {symbol} ja coletado. Pulando.")
                 continue
             print(f"[{idx}/{total_symbols}] Processando {symbol}…")
             if page.is_closed():
-                page = await context.new_page()
-                await page.goto(
-                    BASE_URL,
-                    wait_until="domcontentloaded",
-                    timeout=max(goto_timeout_ms, 1000),
-                )
-                await _wait_idle(page)
-                await _select_all_underlyings(page)
-            try:
-                rows = await _scrape_symbol(
-                    page,
-                    symbol,
-                    throttle_sec=throttle_sec,
-                    goto_timeout_ms=goto_timeout_ms,
-                    far_quotes=far_quotes,
-                )
-            except Exception as exc:  # noqa: BLE001 – queremos continuar
-                print(f"  -> erro ao processar {symbol}: {exc}")
+                await _reset_browser()
+            rows = None
+            for attempt in range(2):
+                try:
+                    rows = await _scrape_symbol(
+                        page,
+                        symbol,
+                        throttle_sec=throttle_sec,
+                        goto_timeout_ms=goto_timeout_ms,
+                        far_quotes=far_quotes,
+                    )
+                    break
+                except Exception as exc:  # noqa: BLE001 – queremos continuar
+                    if _is_target_closed(exc) and attempt == 0:
+                        print("  -> navegador fechou. Reiniciando e tentando novamente...")
+                        await _reset_browser()
+                        continue
+                    print(f"  -> erro ao processar {symbol}: {exc}")
+                    break
+            if rows is None:
                 continue
 
             if not rows:
@@ -509,7 +534,7 @@ async def scrape_all(
             total_written += new_for_symbol
             print(f"  -> {len(rows)} linhas coletadas (novas: {new_for_symbol}).")
 
-            if resume and progress and progress_file and checkpoint_file:
+            if resume_enabled and progress and progress_file and checkpoint_file:
                 append_rows_dedup(checkpoint_file, rows, checkpoint_existing_tickers)
                 if symbol not in processed_symbols:
                     processed_symbols.add(symbol)
@@ -541,7 +566,7 @@ async def scrape_all(
             total_written = append_rows_dedup(output_csv, rows_to_write, existing_tickers)
         print(f"Concluído. Novos registros gravados: {total_written}. Arquivo: {output_csv}")
 
-        if resume and progress_file:
+        if resume_enabled and progress_file:
             with contextlib.suppress(Exception):
                 progress_file.unlink()
             if checkpoint_file:
