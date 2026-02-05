@@ -97,8 +97,8 @@ def parse_args() -> argparse.Namespace:
     sc.add_argument(
         "--backfill-days",
         type=int,
-        default=90,
-        help="Após o scrape, baixa histórico de preços dos underlyings via yfinance (default: 90 dias). Use 0 para não baixar.",
+        default=120,
+        help="Após o scrape, baixa histórico de preços dos underlyings via yfinance (default: 120 dias). Use 0 para não baixar.",
     )
     sc.add_argument(
         "--no-backfill",
@@ -106,10 +106,12 @@ def parse_args() -> argparse.Namespace:
         help="Não roda o backfill de preços após o scrape.",
     )
     sc.add_argument(
-        "--resume",
-        action="store_true",
-        help="Usa checkpoint incremental (automatico por padrao).",
+        "--no-resume",
+        dest="resume",
+        action="store_false",
+        help="Desativa o uso de checkpoint incremental (habilitado por padrão).",
     )
+    sc.set_defaults(resume=True)
     sc.add_argument(
         "--resume-file",
         type=Path,
@@ -359,7 +361,7 @@ def main() -> None:
                 proxy_settings=proxy_settings,
                 fundamentals_csv=args.fundamentals,
                 use_status_invest=use_status_invest,
-                resume=bool(getattr(args, "resume", False)),
+                resume=bool(getattr(args, "resume", True)),
                 progress_path=getattr(args, "resume_file", None),
             )
         )

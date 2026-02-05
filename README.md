@@ -150,6 +150,7 @@ Páginas principais:
 - Ranking: oportunidades com/sem bid+ask (watchlist).
 - Covered Call e Cash-Covered Put: sugestões e lotes.
 - Posições: P/L e alertas.
+- Auditoria: reconciliação de fluxo de caixa vs posições.
 - DARF e configurações.
 
 ## Funcionamento do ranking e scores
