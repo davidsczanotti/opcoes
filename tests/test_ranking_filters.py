@@ -75,3 +75,28 @@ def test_underlying_filter_contains_substring():
     assert {o["ticker"] for o in ctx["data"].rational_opportunities} == {"ABCD3"}
     assert {o["ticker"] for o in ctx["data"].lottery_opportunities} == {"ABCD4"}
     assert {o["ticker"] for o in ctx["data"].recurring_opportunities} == {"ABCD5"}
+
+
+def test_segment_uses_absolute_delta_for_puts():
+    data = _base_report()
+    data.opportunities = [
+        {"ticker": "PUTITM1", "underlying": "WXYZ3", "option_type": "PUT", "delta": -0.75},
+    ]
+    data.theoretical_opportunities = []
+    data.rational_opportunities = []
+    data.lottery_opportunities = []
+    data.recurring_opportunities = []
+
+    ctx = calculate_ranking_strategy(
+        data=data,
+        min_score=1,
+        limit=10,
+        recurring_days=30,
+        recurring_limit=10,
+        underlying_filter="",
+        option_type_filter="",
+    )
+
+    assert [o["ticker"] for o in ctx["segments"]["carteira"]] == ["PUTITM1"]
+    assert ctx["segments"]["alavancagem"] == []
+    assert ctx["segments"]["aposta"] == []

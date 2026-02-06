@@ -135,3 +135,51 @@ def test_record_premium_with_darf_provision(monkeypatch, tmp_path) -> None:
         assert monthly_net
         assert monthly_net[-1]["month"] == "2025-01"
         assert abs(float(monthly_net[-1]["total"]) - (gross * (1 - 0.15) + gross * (1 - 0.20))) < 1e-6
+
+
+def test_record_premium_darf_is_rounded_to_cents(monkeypatch, tmp_path) -> None:
+    db_path = tmp_path / "premium_darf_rounding.db"
+    monkeypatch.setenv("OPCOES_DB_PATH", str(db_path))
+
+    underlying = "CMIG4"
+    put_ticker = "CMIGM100"
+
+    snap = SnapshotDB(db_path)
+    snap.record_options(
+        "2025-01-01",
+        [
+            _build_option_row(underlying=underlying, ticker=put_ticker, option_type="PUT", strike="10,00"),
+        ],
+    )
+    snap.close()
+    _insert_underlying_snapshot(db_path, snapshot_date="2025-01-01", underlying=underlying, price=10.50)
+
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+
+    qty = 3
+    entry_price = 0.99
+
+    res = client.post(
+        "/positions/add",
+        data={
+            "ticker": put_ticker,
+            "underlying": "",
+            "qty": str(qty),
+            "entry_price": f"{entry_price:.2f}",
+            "trade_date": "2025-01-02",
+            "trade_type": "swing",
+            "strategy_tag": "cash_put",
+            "record_premium": "1",
+            "reserve_darf": "1",
+            "is_simulated": "0",
+        },
+    )
+    assert res.status_code in (302, 303)
+
+    put_pos = portfolio.list_positions(ticker=put_ticker, include_closed=False, is_simulated=False)[0]
+    txs = finance.get_transactions(limit=50)
+    darf = [t for t in txs if t.type == finance.TransactionType.DARF and t.position_id == put_pos["id"]]
+    assert len(darf) == 1
+    assert abs(darf[0].amount - (-0.45)) < 1e-6

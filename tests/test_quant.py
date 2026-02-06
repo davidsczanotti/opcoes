@@ -33,6 +33,7 @@ def test_score_iv_rank():
     assert quant.score_iv_rank(30.0) == 2.0 # Core range 10-60 -> 1.0 * 2.0 = 2.0
     # Rank 5: Core 0, Bonus (20-5)/20 * 0.5 = 0.375
     assert quant.score_iv_rank(5.0) == 0.375
+    assert quant.score_iv_rank(70.0) < quant.score_iv_rank(60.0)
 
 def test_black_scholes_call():
     # Exemplo simples: Spot=100, Strike=100, Vol=20%, T=1 ano, r=0

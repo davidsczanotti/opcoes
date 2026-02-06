@@ -55,7 +55,7 @@ def _segment_opportunities(opps: List[Dict]) -> Dict[str, List[Dict]]:
         status = (o.get("Status_Moneyness") or "").lower()
         delta = o.get("delta")
         try:
-            delta_val = float(delta) if delta is not None else None
+            delta_val = abs(float(delta)) if delta is not None else None
         except (TypeError, ValueError):
             delta_val = None
 

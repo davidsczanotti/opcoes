@@ -146,11 +146,16 @@ def _aggregate_put_premiums_by_month(
             continue
 
         trade_type = (pos.get("trade_type") or "swing").strip().lower()
-        aliquota_opts = 0.20 if "day" in trade_type else 0.15
-        premium_bruto = (entry * qty)
-        base_premio = max(0.0, float(premium_bruto - fees))
-        ir_premio = base_premio * aliquota_opts
-        val = float(premium_bruto - fees - ir_premio)
+        premium_amount = finance.calculate_option_premium(
+            entry_price=entry,
+            qty=qty,
+            fees=fees,
+        )
+        darf_amount = finance.calculate_darf_provision(
+            premium_amount=premium_amount,
+            trade_type=trade_type,
+        )
+        val = float(premium_amount + darf_amount)
 
         m_key = dt.strftime("%Y-%m")
         premiums_agg[m_key] = premiums_agg.get(m_key, 0.0) + val

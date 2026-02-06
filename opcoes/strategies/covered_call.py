@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Mapping, Tuple
 
+from .. import finance
 from ..portfolio import list_positions
 from ..snapshot_repository import fetch_latest_underlying_options, fetch_latest_underlying_quote
 from ..settings import get_covered_call_settings, update_covered_call_settings
@@ -161,7 +162,6 @@ def _call_cashflow_summaries(
         if qty <= 0:
             continue
         trade_type = (pos.get("trade_type") or "swing").strip().lower()
-        aliquota_opts = 0.20 if "day" in trade_type else 0.15
         aliquota_acao = 0.15
         price_call = float(pos.get("entry_price") or 0.0)
         fees = float(pos.get("fees") or 0.0)
@@ -178,9 +178,17 @@ def _call_cashflow_summaries(
                 local_avg_cost = float(lot.get("entry_price") or 0.0)
 
         premium_bruto = price_call * qty
-        base_premio = max(0.0, premium_bruto - fees)
-        ir_premio = base_premio * aliquota_opts
-        premio_liq = premium_bruto - fees - ir_premio
+        premium_amount = finance.calculate_option_premium(
+            entry_price=price_call,
+            qty=qty,
+            fees=fees,
+        )
+        darf_premio = finance.calculate_darf_provision(
+            premium_amount=premium_amount,
+            trade_type=trade_type,
+        )
+        ir_premio = -darf_premio
+        premio_liq = premium_amount + darf_premio
 
         pl_expira = premio_liq
         pl_expira_pct = None

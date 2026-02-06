@@ -49,6 +49,7 @@ from .progress import (
 from ..utils import infer_option_type, format_decimal as _format_decimal
 from .. import quant
 from .health import check_health
+from ..config import get_db_path
 
 
 # Número de vencimentos a selecionar no filtro da tela.
@@ -264,7 +265,7 @@ async def scrape_all(
             flow_store = None
         snapshot_db: Optional[SnapshotDB] = None
         try:
-            snapshot_db = SnapshotDB(Path("data/opcoes_snapshots.db"))
+            snapshot_db = SnapshotDB(get_db_path())
         except Exception as exc:  # noqa: BLE001
             print(f"Aviso: falhou snapshots DB: {exc}")
             snapshot_db = None
@@ -442,89 +443,89 @@ async def scrape_all(
                     status_remoto = quant.classify_remote_bet(prob_itm * 100.0 if prob_itm is not None else None, extrinsic_pct, days)
                     r["Status_Remoto"] = status_remoto
             else:
-                            for r in rows:
-                                r["custo_pct"] = ""
-                                r["intrinsic_value"] = ""
-                                r["extrinsic_value"] = ""
-                                r["extrinsic_pct_spot"] = ""
-                                r["breakeven_price"] = ""
-                                r["breakeven_dist_pct"] = ""
-                                r["prob_itm_pct"] = ""
-                                r["prob_2x_pct"] = ""
-                                r["prob_be_pct"] = ""
-                                r["Status_Remoto"] = ""
-                
-                            iv_summary = _summarize_iv(rows)
-                            iv_ranks: Dict[Tuple[str, str], Optional[float]] = {}
-                            if iv_store and iv_summary:
-                                entries = [
-                                    (key_underlying, key_venc, snapshot_date, value)
-                                    for (key_underlying, key_venc), value in iv_summary.items()
-                                    if value is not None
-                                ]
-                                iv_store.record_many(entries)
-                                for (key_underlying, key_venc), value in iv_summary.items():
-                                    if value is None:
-                                        continue
-                                    rank = iv_store.rank_for(key_underlying, key_venc, snapshot_date, value)
-                                    iv_ranks[(key_underlying, key_venc)] = rank
-                
-                            flow_records: List[Tuple[str, str, Optional[float], Optional[float]]] = []
-                            flow_ratios: Dict[str, Tuple[Optional[float], Optional[float]]] = {}
-                            if flow_store:
-                                for r in rows:
-                                    ticker = _normalize_ticker(r.get("ticker"))
-                                    if not ticker:
-                                        continue
-                                    vol = _parse_float(r.get("vol_financeiro"))
-                                    num = _parse_float(r.get("num_neg"))
-                                    if vol is None and num is None:
-                                        continue
-                                    avg_vol, avg_num = flow_store.averages(ticker, snapshot_date)
-                                    ratio_vol = vol / avg_vol if avg_vol and vol is not None and avg_vol > 0 else None
-                                    ratio_num = num / avg_num if avg_num and num is not None and avg_num > 0 else None
-                                    flow_ratios[ticker] = (ratio_vol, ratio_num)
-                                    flow_records.append((ticker, snapshot_date, vol, num))
-                                flow_store.record_many(flow_records)
-                
-                            for r in rows:
-                                ticker_key = _normalize_ticker(r.get("ticker"))
-                                ratios = flow_ratios.get(ticker_key)
-                                if ratios:
-                                    vol_ratio, num_ratio = ratios
-                                    r["vol_fluxo_5d"] = _format_decimal(vol_ratio, decimals=2, signed=False) if vol_ratio is not None else ""
-                                    r["num_fluxo_5d"] = _format_decimal(num_ratio, decimals=2, signed=False) if num_ratio is not None else ""
-                                else:
-                                    r["vol_fluxo_5d"] = ""
-                                    r["num_fluxo_5d"] = ""
-                
-                            for r in rows:
-                                key = (_normalize_underlying(r.get("underlying")), r.get("vencimento", ""))
-                                rank = iv_ranks.get(key)
-                                iv_pts = 0.0
-                                if rank is not None:
-                                    rank_str = _format_decimal(rank, decimals=1, signed=False)
-                                    iv_pts = quant.score_iv_rank(rank, _parse_float(r.get("vol_impl_perc")))
-                                    r["iv_rank_180d"] = rank_str
-                                    r["iv_score"] = _format_decimal(iv_pts, decimals=2, signed=False)
-                                else:
-                                    r["iv_rank_180d"] = ""
-                                    r["iv_score"] = ""
-                                
-                                final_score = quant.calculate_weighted_score(
-                                    moneyness_score=_parse_float(r.get("moneyness_score")) or 0.0,
-                                    prob_itm_pct=_parse_float(r.get("prob_itm_pct")),
-                                    prob_itm_delta_pct=_parse_float(r.get("prob_itm_delta_pct")),
-                                    extrinsic_pct_spot=_parse_float(r.get("extrinsic_pct_spot")),
-                                    liquidity_score=_parse_float(r.get("liquidez_score")) or 0.0,
-                                    iv_score=iv_pts,
-                                    theta_score=_parse_float(r.get("theta_score")) or 0.0,
-                                    em2x_score=_parse_float(r.get("em2x_score")) or 0.0,
-                                    double_score=_parse_float(r.get("dobro_score")) or 0.0,
-                                    status_remote=r.get("Status_Remoto") or ""
-                                )
-                                r["score_total"] = _format_decimal(final_score, decimals=2, signed=False)
-                                _apply_penalties(r)
+                for r in rows:
+                    r["custo_pct"] = ""
+                    r["intrinsic_value"] = ""
+                    r["extrinsic_value"] = ""
+                    r["extrinsic_pct_spot"] = ""
+                    r["breakeven_price"] = ""
+                    r["breakeven_dist_pct"] = ""
+                    r["prob_itm_pct"] = ""
+                    r["prob_2x_pct"] = ""
+                    r["prob_be_pct"] = ""
+                    r["Status_Remoto"] = ""
+
+            iv_summary = _summarize_iv(rows)
+            iv_ranks: Dict[Tuple[str, str], Optional[float]] = {}
+            if iv_store and iv_summary:
+                entries = [
+                    (key_underlying, key_venc, snapshot_date, value)
+                    for (key_underlying, key_venc), value in iv_summary.items()
+                    if value is not None
+                ]
+                iv_store.record_many(entries)
+                for (key_underlying, key_venc), value in iv_summary.items():
+                    if value is None:
+                        continue
+                    rank = iv_store.rank_for(key_underlying, key_venc, snapshot_date, value)
+                    iv_ranks[(key_underlying, key_venc)] = rank
+
+            flow_records: List[Tuple[str, str, Optional[float], Optional[float]]] = []
+            flow_ratios: Dict[str, Tuple[Optional[float], Optional[float]]] = {}
+            if flow_store:
+                for r in rows:
+                    ticker = _normalize_ticker(r.get("ticker"))
+                    if not ticker:
+                        continue
+                    vol = _parse_float(r.get("vol_financeiro"))
+                    num = _parse_float(r.get("num_neg"))
+                    if vol is None and num is None:
+                        continue
+                    avg_vol, avg_num = flow_store.averages(ticker, snapshot_date)
+                    ratio_vol = vol / avg_vol if avg_vol and vol is not None and avg_vol > 0 else None
+                    ratio_num = num / avg_num if avg_num and num is not None and avg_num > 0 else None
+                    flow_ratios[ticker] = (ratio_vol, ratio_num)
+                    flow_records.append((ticker, snapshot_date, vol, num))
+                flow_store.record_many(flow_records)
+
+            for r in rows:
+                ticker_key = _normalize_ticker(r.get("ticker"))
+                ratios = flow_ratios.get(ticker_key)
+                if ratios:
+                    vol_ratio, num_ratio = ratios
+                    r["vol_fluxo_5d"] = _format_decimal(vol_ratio, decimals=2, signed=False) if vol_ratio is not None else ""
+                    r["num_fluxo_5d"] = _format_decimal(num_ratio, decimals=2, signed=False) if num_ratio is not None else ""
+                else:
+                    r["vol_fluxo_5d"] = ""
+                    r["num_fluxo_5d"] = ""
+
+            for r in rows:
+                key = (_normalize_underlying(r.get("underlying")), r.get("vencimento", ""))
+                rank = iv_ranks.get(key)
+                iv_pts = 0.0
+                if rank is not None:
+                    rank_str = _format_decimal(rank, decimals=1, signed=False)
+                    iv_pts = quant.score_iv_rank(rank, _parse_float(r.get("vol_impl_perc")))
+                    r["iv_rank_180d"] = rank_str
+                    r["iv_score"] = _format_decimal(iv_pts, decimals=2, signed=False)
+                else:
+                    r["iv_rank_180d"] = ""
+                    r["iv_score"] = ""
+
+                final_score = quant.calculate_weighted_score(
+                    moneyness_score=_parse_float(r.get("moneyness_score")) or 0.0,
+                    prob_itm_pct=_parse_float(r.get("prob_itm_pct")),
+                    prob_itm_delta_pct=_parse_float(r.get("prob_itm_delta_pct")),
+                    extrinsic_pct_spot=_parse_float(r.get("extrinsic_pct_spot")),
+                    liquidity_score=_parse_float(r.get("liquidez_score")) or 0.0,
+                    iv_score=iv_pts,
+                    theta_score=_parse_float(r.get("theta_score")) or 0.0,
+                    em2x_score=_parse_float(r.get("em2x_score")) or 0.0,
+                    double_score=_parse_float(r.get("dobro_score")) or 0.0,
+                    status_remote=r.get("Status_Remoto") or ""
+                )
+                r["score_total"] = _format_decimal(final_score, decimals=2, signed=False)
+                _apply_penalties(r)
                 
             snapshot_rows.extend(rows)
             new_for_symbol = 0
@@ -1170,7 +1171,7 @@ def _score_iv(rank: Optional[float], vol_impl: Optional[float] = None) -> float:
     elif rank <= 60.0:
         core = 1.0
     elif rank < 90.0:
-        core = (90.0 - rank) / 10.0
+        core = (90.0 - rank) / 30.0
     else:
         core = 0.0
     core = max(0.0, min(core, 1.0)) * 2.0

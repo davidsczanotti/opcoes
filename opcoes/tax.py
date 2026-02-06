@@ -3,9 +3,9 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Optional
 
-DB_PATH = Path("data/opcoes_snapshots.db")
+from .config import get_db_path
 
 
 @dataclass
@@ -20,13 +20,23 @@ class TaxSummary:
     daytrade_irrf: float
 
 
-def compute_tax(month: int, year: int) -> TaxSummary:
-    conn = sqlite3.connect(DB_PATH)
+def compute_tax(
+    month: int,
+    year: int,
+    *,
+    is_simulated: Optional[bool] = False,
+    db_path: Optional[Path] = None,
+) -> TaxSummary:
+    resolved_db_path = Path(db_path) if db_path is not None else get_db_path()
+    conn = sqlite3.connect(resolved_db_path)
     cur = conn.cursor()
     try:
         cols = {row[1] for row in cur.execute('PRAGMA table_info("positions")').fetchall()}
         if "side" not in cols:
             cur.execute('ALTER TABLE positions ADD COLUMN "side" TEXT DEFAULT \'long\'')
+            conn.commit()
+        if "is_simulated" not in cols:
+            cur.execute('ALTER TABLE positions ADD COLUMN "is_simulated" INTEGER DEFAULT 0')
             conn.commit()
     except sqlite3.Error:
         pass
@@ -35,12 +45,21 @@ def compute_tax(month: int, year: int) -> TaxSummary:
     swing_irrf = 0.0
     daytrade_irrf = 0.0
 
+    where = ""
+    params: list[object] = []
+    if is_simulated is True:
+        where = "WHERE COALESCE(is_simulated, 0) = 1"
+    elif is_simulated is False:
+        where = "WHERE COALESCE(is_simulated, 0) = 0"
+
     cur.execute(
-        """
+        f"""
         SELECT trade_type, trade_date, qty, entry_price, fees, partial_date, partial_price, partial_qty,
                exit_date, exit_price, irrf, side
         FROM positions
-        """
+        {where}
+        """,
+        params,
     )
     rows = cur.fetchall()
     conn.close()

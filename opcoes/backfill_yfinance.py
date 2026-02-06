@@ -4,15 +4,15 @@ import argparse
 import datetime as dt
 import sqlite3
 from pathlib import Path
-from typing import Iterable, List, Optional, Set
+from typing import Iterable, List, Optional
 
 import yfinance as yf
 
-
-DB_PATH = Path("data/opcoes_snapshots.db")
+from .config import get_db_path
 
 
 def _connect(db_path: Path) -> sqlite3.Connection:
+    db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     return conn
@@ -85,7 +85,7 @@ def _backfill_prices(
 
 def backfill_prices(
     *,
-    db_path: Path = DB_PATH,
+    db_path: Optional[Path] = None,
     days: int = 90,
     underlyings: Optional[Iterable[str]] = None,
 ) -> None:
@@ -94,7 +94,8 @@ def backfill_prices(
     - `underlyings`: se None, usa todos presentes em option_snapshots.
     - `days`: quantos dias para trás baixar (default: 90).
     """
-    conn = _connect(db_path)
+    resolved_db_path = Path(db_path) if db_path is not None else get_db_path()
+    conn = _connect(resolved_db_path)
     try:
         if underlyings is None:
             symbols = _list_underlyings(conn)
@@ -109,8 +110,14 @@ def backfill_prices(
 
 
 def main() -> None:
+    default_db = get_db_path()
     parser = argparse.ArgumentParser(description="Backfill de preços diários via yfinance para underlying_snapshots.")
-    parser.add_argument("--db", type=Path, default=DB_PATH, help="Caminho do opcoes_snapshots.db (default: data/opcoes_snapshots.db)")
+    parser.add_argument(
+        "--db",
+        type=Path,
+        default=default_db,
+        help=f"Caminho do opcoes_snapshots.db (default: {default_db})",
+    )
     parser.add_argument(
         "--days",
         type=int,

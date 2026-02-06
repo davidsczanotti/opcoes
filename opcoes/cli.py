@@ -252,6 +252,12 @@ def parse_args() -> argparse.Namespace:
     tc = sub.add_parser("tax", help="Relatório fiscal (DARF)")
     tc.add_argument("--year", type=int, required=True, help="Ano (YYYY)")
     tc.add_argument("--month", type=int, required=True, help="Mês (1-12)")
+    tc.add_argument(
+        "--mode",
+        choices=["real", "simulated", "all"],
+        default="real",
+        help="Filtra posições reais, simuladas, ou ambas (default: real).",
+    )
 
     fc = sub.add_parser("fundamentus", help="Coleta Fundamentus (busca avançada)")
     fc.add_argument("--pl-min", type=float, default=0.0, help="Filtro mínimo de P/L (default: 0)")
@@ -472,8 +478,17 @@ def main() -> None:
             f"snapshots {removed['option_snapshots']} apagados, underlyings {removed['underlying_snapshots']} apagados."
         )
     elif args.cmd == "tax":
-        summary = compute_tax(month=args.month, year=args.year)
-        print(f"Relatório fiscal {summary.month:02d}/{summary.year}")
+        mode = (args.mode or "real").strip().lower()
+        is_simulated: Optional[bool]
+        if mode == "simulated":
+            is_simulated = True
+        elif mode == "all":
+            is_simulated = None
+        else:
+            mode = "real"
+            is_simulated = False
+        summary = compute_tax(month=args.month, year=args.year, is_simulated=is_simulated)
+        print(f"Relatório fiscal {summary.month:02d}/{summary.year} (modo: {mode})")
         print(f"  Swing trade: lucro líquido R$ {summary.swing_net:.2f}, IR devido R$ {summary.swing_ir:.2f}, IRRF R$ {summary.swing_irrf:.2f}")
         print(f"  Day trade:   lucro líquido R$ {summary.daytrade_net:.2f}, IR devido R$ {summary.daytrade_ir:.2f}, IRRF R$ {summary.daytrade_irrf:.2f}")
         total_ir = summary.swing_ir + summary.daytrade_ir

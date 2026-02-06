@@ -71,6 +71,24 @@ def _ensure_table(conn: sqlite3.Connection, *, commit: bool) -> None:
         conn.commit()
 
 
+def option_tax_rate(trade_type: str) -> float:
+    """Retorna alíquota de IR para opções: 20% day trade, 15% swing."""
+    return 0.20 if "day" in (trade_type or "").lower() else 0.15
+
+
+def calculate_option_premium(*, entry_price: float, qty: int, fees: float = 0.0) -> float:
+    """Calcula prêmio líquido de taxas para venda de opção."""
+    return (float(entry_price) * int(qty)) - float(fees or 0.0)
+
+
+def calculate_darf_provision(*, premium_amount: float, trade_type: str) -> float:
+    """Calcula provisão de DARF (valor negativo), arredondada a centavos."""
+    base_ir = max(0.0, float(premium_amount))
+    if base_ir <= 0:
+        return 0.0
+    return -round(base_ir * option_tax_rate(trade_type), 2)
+
+
 def add_transaction(
     date: str,
     type: TransactionType,
@@ -290,9 +308,11 @@ def recalc_position_premium_and_darf(
                 )
 
         # DARF
-        aliquota_opts = 0.20 if "day" in (trade_type or "").lower() else 0.15
-        base_ir = max(0.0, float(premium_amount))
-        darf_amount = -round(base_ir * aliquota_opts, 2) if base_ir > 0 else 0.0
+        aliquota_opts = option_tax_rate(trade_type)
+        darf_amount = calculate_darf_provision(
+            premium_amount=premium_amount,
+            trade_type=trade_type,
+        )
 
         if darf_amount != 0.0:
             if by_type[TransactionType.DARF.value]:

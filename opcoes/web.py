@@ -496,10 +496,15 @@ def create_app() -> Flask:
             expected_premium = None
             expected_darf = None
             if is_option and side == "short":
-                expected_premium = (entry_price * qty) - fees
-                aliquota = 0.20 if "day" in trade_type else 0.15
-                base_ir = max(0.0, float(expected_premium))
-                expected_darf = -round(base_ir * aliquota, 2) if base_ir > 0 else 0.0
+                expected_premium = finance.calculate_option_premium(
+                    entry_price=entry_price,
+                    qty=qty,
+                    fees=fees,
+                )
+                expected_darf = finance.calculate_darf_provision(
+                    premium_amount=expected_premium,
+                    trade_type=trade_type,
+                )
 
             actual_premium = ledger_sums.get(pid, {}).get(finance.TransactionType.PREMIUM.value)
             actual_darf = ledger_sums.get(pid, {}).get(finance.TransactionType.DARF.value)
@@ -622,7 +627,11 @@ def create_app() -> Flask:
             is_option = bool(u) and t and t != u
 
             if is_option:
-                total_premium = (entry_price * qty) - fees
+                total_premium = finance.calculate_option_premium(
+                    entry_price=entry_price,
+                    qty=qty,
+                    fees=fees,
+                )
                 finance.add_transaction(
                     date=form.get("trade_date", ""),
                     type=finance.TransactionType.PREMIUM,
@@ -634,14 +643,16 @@ def create_app() -> Flask:
 
                 if form.get("reserve_darf") == "1":
                     trade_type = (form.get("trade_type") or "swing").strip().lower()
-                    aliquota_opts = 0.20 if "day" in trade_type else 0.15
-                    base_ir = max(0.0, float(total_premium))
-                    darf = base_ir * aliquota_opts
-                    if darf > 0:
+                    darf_amount = finance.calculate_darf_provision(
+                        premium_amount=total_premium,
+                        trade_type=trade_type,
+                    )
+                    if darf_amount != 0.0:
+                        aliquota_opts = finance.option_tax_rate(trade_type)
                         finance.add_transaction(
                             date=form.get("trade_date", ""),
                             type=finance.TransactionType.DARF,
-                            amount=-darf,
+                            amount=darf_amount,
                             description=f"Provisão DARF {ticker} ({int(aliquota_opts*100)}%)",
                             position_id=pos_id,
                             is_simulated=is_simulated,
@@ -682,7 +693,11 @@ def create_app() -> Flask:
         except (TypeError, ValueError):
             fees = 0.0
 
-        total_premium = (entry_price * qty) - fees
+        total_premium = finance.calculate_option_premium(
+            entry_price=entry_price,
+            qty=qty,
+            fees=fees,
+        )
         if total_premium <= 0:
             return redirect(next_url)
 
@@ -701,14 +716,16 @@ def create_app() -> Flask:
         reserve_darf = request.form.get("reserve_darf", "1") == "1"
         if reserve_darf:
             trade_type = (pos.get("trade_type") or "swing").strip().lower()
-            aliquota_opts = 0.20 if "day" in trade_type else 0.15
-            base_ir = max(0.0, float(total_premium))
-            darf = base_ir * aliquota_opts
-            if darf > 0:
+            darf_amount = finance.calculate_darf_provision(
+                premium_amount=total_premium,
+                trade_type=trade_type,
+            )
+            if darf_amount != 0.0:
+                aliquota_opts = finance.option_tax_rate(trade_type)
                 finance.add_transaction(
                     date=trade_date,
                     type=finance.TransactionType.DARF,
-                    amount=-darf,
+                    amount=darf_amount,
                     description=f"Provisão DARF {ticker} ({int(aliquota_opts*100)}%)",
                     position_id=position_id,
                     is_simulated=is_simulated,
@@ -748,7 +765,11 @@ def create_app() -> Flask:
         if entry_price <= 0 or qty <= 0:
             return redirect(next_url)
 
-        total_premium = (entry_price * qty) - fees
+        total_premium = finance.calculate_option_premium(
+            entry_price=entry_price,
+            qty=qty,
+            fees=fees,
+        )
         trade_date = pos.get("trade_date") or datetime.date.today().isoformat()
         trade_type = (pos.get("trade_type") or "swing").strip().lower()
         is_simulated = bool(pos.get("is_simulated") or 0)

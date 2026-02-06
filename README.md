@@ -139,7 +139,10 @@ Os parâmetros do filtro podem ser ajustados com as flags do comando.
 ### DARF / relatório fiscal
 ```bash
 poetry run python -m opcoes.cli tax --year 2025 --month 1
+poetry run python -m opcoes.cli tax --year 2025 --month 1 --mode simulated
+poetry run python -m opcoes.cli tax --year 2025 --month 1 --mode all
 ```
+`--mode` aceita `real` (default), `simulated` ou `all`.
 
 ## Web app
 Rode:
@@ -193,3 +196,8 @@ Sem `RUN_E2E_TESTS`, os testes e2e são ignorados.
 - Bid/ask podem não estar disponíveis na fonte. Quando ausentes, o app trata como watchlist
   e usa último/preço teórico apenas como referência.
 - O CSV mantém unicidade por `ticker` e normaliza números no padrão pt-BR.
+- Melhorias recentes:
+  - Recalculo de score/IV no scraper aplicado em todos os casos (com e sem preço do ativo).
+  - Segmentação de ranking por delta usando `abs(delta)` (corrige classificação de PUTs).
+  - Cálculo de prêmio/DARF centralizado e DARF sempre arredondado em centavos.
+  - Relatório fiscal (`tax`) agora suporta filtro de modo `real/simulated/all`.

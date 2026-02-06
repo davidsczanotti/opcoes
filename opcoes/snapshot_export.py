@@ -5,9 +5,8 @@ import sqlite3
 from pathlib import Path
 from typing import Optional, Sequence
 
+from .config import get_db_path
 from .scraper.storage import CSV_FIELDS, CSV_WRITER_KWARGS, _ensure_parent, normalize_csv_row
-
-DB_PATH = Path("data/opcoes_snapshots.db")
 
 def _ensure_snapshot_columns(conn: sqlite3.Connection) -> None:
     try:
@@ -36,6 +35,7 @@ def export_snapshot(
     *,
     output_csv: Path,
     snapshot_date: Optional[str] = None,
+    db_path: Optional[Path] = None,
 ) -> Path:
     """Exporta um snapshot para CSV (sem deduplicar por ticker).
 
@@ -46,7 +46,8 @@ def export_snapshot(
     output_csv = Path(output_csv)
     _ensure_parent(output_csv)
 
-    conn = sqlite3.connect(DB_PATH)
+    resolved_db_path = Path(db_path) if db_path is not None else get_db_path()
+    conn = sqlite3.connect(resolved_db_path)
     conn.row_factory = sqlite3.Row
     try:
         _ensure_snapshot_columns(conn)

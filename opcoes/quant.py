@@ -119,7 +119,7 @@ def score_iv_rank(rank: Optional[float], vol_impl: Optional[float] = None) -> fl
     elif rank <= 60.0:
         core = 1.0
     elif rank < 90.0:
-        core = (90.0 - rank) / 10.0
+        core = (90.0 - rank) / 30.0
     else:
         core = 0.0
     core = max(0.0, min(core, 1.0)) * 2.0
