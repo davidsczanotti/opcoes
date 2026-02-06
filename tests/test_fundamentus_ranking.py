@@ -1,4 +1,9 @@
-from opcoes.fundamentus import FundamentusFilterConfig, fetch_approved_ranking, save_signals
+from opcoes.fundamentus import (
+    FundamentusFilterConfig,
+    fetch_approved_ranking,
+    fetch_filter_run,
+    save_signals,
+)
 
 
 def _signal(papel: str, status: str) -> dict:
@@ -43,3 +48,9 @@ def test_fetch_approved_ranking_total_and_window(monkeypatch, tmp_path) -> None:
     assert window["end_date"] == "2026-01-10"
     assert [row["papel"] for row in window["rows"]] == ["ITUB4"]
     assert [row["approvals"] for row in window["rows"]] == [1]
+
+    run = fetch_filter_run(snapshot_date="2026-01-10")
+    assert run is not None
+    assert run["snapshot_date"] == "2026-01-10"
+    assert run["liq_2m_min"] == cfg.liq_2m_min
+    assert run["div_yield_min"] == cfg.div_yield_min

@@ -20,7 +20,7 @@
         min-width: 1400px;
       }
       .put-table {
-        min-width: 900px;
+        min-width: 1500px;
       }
       .fundamentus-table thead th {
         position: sticky;
@@ -80,6 +80,32 @@
             | Aprovadas: {{ approved_count }} | Reprovadas: {{ rejected_count }}
           {% endif %}
         </p>
+      {% endif %}
+      {% if snapshot_lag_days is not none and snapshot_lag_days > 0 %}
+        <div class="alert alert-warning small" role="alert">
+          Defasagem entre bases: Fundamentus em {{ snapshot_date }} e opcoes em {{ put_snapshot_date }}
+          ({{ snapshot_lag_days }} dia(s)).
+          A selecao de PUT usa preco conservador (bid primeiro). Sem bid, fica como watchlist por ultimo.
+        </div>
+      {% endif %}
+      {% if filter_run %}
+        <div class="card mb-3">
+          <div class="card-header">Filtros aplicados no snapshot</div>
+          <div class="card-body py-2">
+            <div class="row small">
+              <div class="col-md-4">Liq. 2m min: <strong>{{ '%.0f'|format(filter_run.liq_2m_min) }}</strong></div>
+              <div class="col-md-4">Div. Bruta/Patrim max: <strong>{{ '%.2f'|format(filter_run.div_bruta_patrim_max) }}</strong></div>
+              <div class="col-md-4">Cresc. Rec. 5a min: <strong>{{ '%.2f'|format(filter_run.cresc_rec_5a_min) }}%</strong></div>
+              <div class="col-md-4">DY min: <strong>{{ '%.2f'|format(filter_run.div_yield_min) }}%</strong></div>
+              <div class="col-md-4">ROE min: <strong>{{ '%.2f'|format(filter_run.roe_min) }}%</strong></div>
+              <div class="col-md-4">Margem liq. min: <strong>{{ '%.2f'|format(filter_run.margem_liquida_min) }}%</strong></div>
+              <div class="col-md-4">Permite margem zero: <strong>{% if filter_run.margem_liquida_allow_zero %}Sim{% else %}Nao{% endif %}</strong></div>
+              <div class="col-md-8 text-muted">
+                Referencia de configuracao: {{ filter_run.snapshot_date }}
+              </div>
+            </div>
+          </div>
+        </div>
       {% endif %}
 
       {% if signals_available %}
@@ -276,9 +302,23 @@
             {% endif %}
           </div>
           <div class="card-body p-0">
-            <p class="text-muted small mb-2 px-3 pt-2">Use o scroll horizontal para ver todas as colunas.</p>
+            <div class="px-3 pt-2 pb-1">
+              <p class="text-muted small mb-1">
+                Ranking didatico de puts: {{ put_score_formula }}.
+                Filtros ativos: premio >= {{ '%.2f'|format(put_min_premium_pct) }}%, score >= {{ '%.1f'|format(put_min_score) }}.
+              </p>
+              <p class="text-muted small mb-2">
+                Total: {{ put_opportunities | length }} | Watchlist (sem bid): {{ put_watchlist_count }}
+                {% if put_profile_breakdown %}
+                  |
+                  {% for item in put_profile_breakdown %}
+                    {{ item.label }}: {{ item.count }}{% if not loop.last %} |{% endif %}
+                  {% endfor %}
+                {% endif %}
+              </p>
+            </div>
             <div class="table-responsive fundamentus-table-wrap">
-              <table class="table table-sm table-striped align-middle fundamentus-table put-table js-sort-filter-table" data-default-sort-index="5" data-default-sort-direction="desc">
+              <table class="table table-sm table-striped align-middle fundamentus-table put-table js-sort-filter-table" data-default-sort-index="9" data-default-sort-direction="desc">
                 <thead class="table-light">
                   <tr>
                     <th data-type="text">
@@ -303,17 +343,47 @@
                     </th>
                     <th class="text-end" data-type="number">
                       <button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="4" data-type="number">
-                        Ultimo <span class="sort-indicator"></span>
+                        Preco ref <span class="sort-indicator"></span>
                       </button>
                     </th>
-                    <th class="text-end" data-type="percent">
-                      <button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="5" data-type="percent">
-                        Premio % <span class="sort-indicator"></span>
+                    <th data-type="text">
+                      <button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-start" data-index="5" data-type="text">
+                        Fonte <span class="sort-indicator"></span>
                       </button>
                     </th>
                     <th class="text-end" data-type="percent">
                       <button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="6" data-type="percent">
+                        Premio % <span class="sort-indicator"></span>
+                      </button>
+                    </th>
+                    <th class="text-end" data-type="percent">
+                      <button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="7" data-type="percent">
+                        Premio mes % <span class="sort-indicator"></span>
+                      </button>
+                    </th>
+                    <th class="text-end" data-type="percent">
+                      <button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="8" data-type="percent">
                         Dist. Strike % <span class="sort-indicator"></span>
+                      </button>
+                    </th>
+                    <th class="text-end" data-type="number">
+                      <button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="9" data-type="number" title="{{ put_score_formula }}">
+                        Score PUT <span class="sort-indicator"></span>
+                      </button>
+                    </th>
+                    <th data-type="text">
+                      <button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-start" data-index="10" data-type="text">
+                        Perfil <span class="sort-indicator"></span>
+                      </button>
+                    </th>
+                    <th data-type="text">
+                      <button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-start" data-index="11" data-type="text">
+                        Execucao <span class="sort-indicator"></span>
+                      </button>
+                    </th>
+                    <th class="text-end" data-type="number">
+                      <button type="button" class="btn btn-link btn-sm p-0 sort-btn w-100 text-end" data-index="12" data-type="number">
+                        Dias ate venc. <span class="sort-indicator"></span>
                       </button>
                     </th>
                   </tr>
@@ -334,10 +404,28 @@
                       <input class="form-control form-control-sm column-filter" data-index="4" data-type="number" placeholder=">=0" title="Use >, <, <=, >= para comparar">
                     </th>
                     <th>
-                      <input class="form-control form-control-sm column-filter" data-index="5" data-type="percent" placeholder=">=0" title="Use >, <, <=, >= para comparar">
+                      <input class="form-control form-control-sm column-filter" data-index="5" data-type="text" placeholder="bid / ultimo">
                     </th>
                     <th>
                       <input class="form-control form-control-sm column-filter" data-index="6" data-type="percent" placeholder=">=0" title="Use >, <, <=, >= para comparar">
+                    </th>
+                    <th>
+                      <input class="form-control form-control-sm column-filter" data-index="7" data-type="percent" placeholder=">=0" title="Use >, <, <=, >= para comparar">
+                    </th>
+                    <th>
+                      <input class="form-control form-control-sm column-filter" data-index="8" data-type="percent" placeholder=">=0" title="Use >, <, <=, >= para comparar">
+                    </th>
+                    <th>
+                      <input class="form-control form-control-sm column-filter" data-index="9" data-type="number" placeholder=">=0" title="Use >, <, <=, >= para comparar">
+                    </th>
+                    <th>
+                      <input class="form-control form-control-sm column-filter" data-index="10" data-type="text" placeholder="perfil">
+                    </th>
+                    <th>
+                      <input class="form-control form-control-sm column-filter" data-index="11" data-type="text" placeholder="alerta">
+                    </th>
+                    <th>
+                      <input class="form-control form-control-sm column-filter" data-index="12" data-type="number" placeholder=">=0" title="Use >, <, <=, >= para comparar">
                     </th>
                   </tr>
                 </thead>
@@ -348,10 +436,24 @@
                       <td class="text-end">{{ row.cotacao is not none and ('%.2f'|format(row.cotacao)) or '-' }}</td>
                       <td>{{ row.contrato or '-' }}</td>
                       <td class="text-end">{{ row.strike is not none and ('%.2f'|format(row.strike)) or '-' }}</td>
-                      <td class="text-end">{{ row.ultimo is not none and ('%.2f'|format(row.ultimo)) or '-' }}</td>
+                      <td class="text-end">{{ row.preco_ref is not none and ('%.2f'|format(row.preco_ref)) or '-' }}</td>
+                      <td>
+                        {% if row.premium_source == 'best_bid' %}
+                          <span class="badge text-bg-success">bid</span>
+                        {% else %}
+                          <span class="badge text-bg-warning">ultimo</span>
+                        {% endif %}
+                      </td>
                       <td class="text-end">
                         {% if row.premio_pct is not none %}
                           {{ '%.2f'|format(row.premio_pct) }}%
+                        {% else %}
+                          -
+                        {% endif %}
+                      </td>
+                      <td class="text-end">
+                        {% if row.premio_mensal_pct is not none %}
+                          {{ '%.2f'|format(row.premio_mensal_pct) }}%
                         {% else %}
                           -
                         {% endif %}
@@ -363,6 +465,30 @@
                           -
                         {% endif %}
                       </td>
+                      <td class="text-end">
+                        {% if row.put_score is not none %}
+                          {% if row.put_score >= 8 %}
+                            <span class="text-success fw-semibold">{{ '%.2f'|format(row.put_score) }}</span>
+                          {% elif row.put_score >= 6 %}
+                            <span class="text-primary fw-semibold">{{ '%.2f'|format(row.put_score) }}</span>
+                          {% else %}
+                            {{ '%.2f'|format(row.put_score) }}
+                          {% endif %}
+                        {% else %}
+                          -
+                        {% endif %}
+                      </td>
+                      <td>
+                        {% if row.put_profile == 'Conservadora' %}
+                          <span class="badge text-bg-success">{{ row.put_profile }}</span>
+                        {% elif row.put_profile == 'Equilibrada' %}
+                          <span class="badge text-bg-primary">{{ row.put_profile }}</span>
+                        {% else %}
+                          <span class="badge text-bg-warning">{{ row.put_profile }}</span>
+                        {% endif %}
+                      </td>
+                      <td>{{ row.execution_note or '-' }}</td>
+                      <td class="text-end">{{ row.dias_ate_vencimento is not none and ('%d'|format(row.dias_ate_vencimento)) or '-' }}</td>
                     </tr>
                   {% endfor %}
                 </tbody>
@@ -371,6 +497,8 @@
           </div>
           <div class="card-footer text-muted small">
             Strike abaixo da cotacao e distancia ate {{ put_distance_limit_pct }}%.
+            Premio minimo: {{ '%.2f'|format(put_min_premium_pct) }}%.
+            Meta mensal para score: {{ '%.2f'|format(put_target_monthly_yield_pct) }}%.
             {% if put_snapshot_date %}
               | Snapshot opcoes: {{ put_snapshot_date }}
             {% endif %}
@@ -703,7 +831,10 @@
                   </td>
                   <td>
                     {% if row.signal %}
-                      {{ row.signal.reason }}
+                      {{ row.signal.reason_label or row.signal.reason }}
+                      {% if row.signal.reason and row.signal.reason_label and row.signal.reason != row.signal.reason_label %}
+                        <div class="text-muted small">{{ row.signal.reason }}</div>
+                      {% endif %}
                     {% else %}
                       -
                     {% endif %}

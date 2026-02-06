@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Mapping
 
 from ..report import ReportData, generate_report
-from ..utils import infer_option_type
+from ..utils import infer_option_type, parse_ptbr_number
 from ..settings import get_strategy_settings
 
 
@@ -114,6 +114,40 @@ def _filter_by_underlying(items: List[Dict], underlying_filter: str | None) -> L
     ]
 
 
+def _has_full_book(item: Mapping[str, Any]) -> bool:
+    bid = parse_ptbr_number(item.get("best_bid"))
+    ask = parse_ptbr_number(item.get("best_ask"))
+    return bid is not None and bid > 0 and ask is not None and ask > 0
+
+
+def _build_book_availability(
+    opportunities: List[Dict[str, Any]],
+    theoretical_opportunities: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    scoped = list(opportunities) + list(theoretical_opportunities)
+    total_count = len(scoped)
+    tradeable_count = sum(1 for item in scoped if _has_full_book(item))
+    watchlist_count = max(total_count - tradeable_count, 0)
+    watchlist_ratio = (watchlist_count / total_count) if total_count else 0.0
+    watchlist_ratio_pct = watchlist_ratio * 100.0
+
+    no_tradeable = total_count > 0 and tradeable_count == 0
+    mass_missing = total_count >= 5 and watchlist_ratio >= 0.8
+    show_warning = no_tradeable or mass_missing
+    severity = "danger" if no_tradeable else "warning"
+
+    return {
+        "total_count": total_count,
+        "tradeable_count": tradeable_count,
+        "watchlist_count": watchlist_count,
+        "watchlist_ratio_pct": watchlist_ratio_pct,
+        "show_warning": show_warning,
+        "no_tradeable": no_tradeable,
+        "mass_missing": mass_missing,
+        "severity": severity,
+    }
+
+
 def calculate_ranking_strategy(
     data: ReportData,
     min_score: int,
@@ -180,6 +214,10 @@ def calculate_ranking_strategy(
     # Segmentation
     all_opps = list(filtered_data.opportunities) + list(filtered_data.theoretical_opportunities)
     segments = _segment_opportunities(all_opps)
+    book_availability = _build_book_availability(
+        filtered_data.opportunities,
+        filtered_data.theoretical_opportunities,
+    )
 
     return {
         "data": filtered_data,
@@ -195,6 +233,7 @@ def calculate_ranking_strategy(
         "positions_real": positions_real,
         "positions_simulated": positions_simulated,
         "segments": segments,
+        "book_availability": book_availability,
     }
 
 

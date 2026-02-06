@@ -154,6 +154,7 @@ poetry run python -m opcoes.web
 Páginas principais:
 - Ranking: oportunidades com/sem bid+ask (watchlist).
 - Covered Call e Cash-Covered Put: sugestões e lotes.
+- Fundamentus: filtros fundamentalistas + ranking didático de PUTs (score, perfil e alerta de execução).
 - Posições: P/L e alertas.
 - Auditoria: reconciliação de fluxo de caixa vs posições.
 - DARF e configurações.
@@ -207,3 +208,6 @@ Sem `RUN_E2E_TESTS`, os testes e2e são ignorados.
   - `iv_history.db` e `flow_history.db` agora seguem o mesmo diretório do `OPCOES_DB_PATH`, evitando mistura entre contextos.
   - Retomada do scraper migrada para checkpoint SQLite transacional por símbolo (mais resiliente a quedas e reinícios).
   - Aba `Cash-Covered Put` agora filtra prêmios/movimentações por estratégia (`cash_put`) para não misturar lançamentos de `covered_call`.
+  - Aba `Ranking` agora exibe alerta didático automático quando faltar `bid+ask` em massa (ou 100% dos casos), explicando por que o Top pode ficar vazio e os itens irem para Watchlist.
+  - Aba `Fundamentus` agora traduz motivos de reprovação para texto didático, mostra alerta de defasagem entre snapshots e prioriza preço conservador em PUT (`best_bid` antes de `ultimo`).
+  - Ranking de PUTs na aba `Fundamentus` ganhou score didático (segurança/renda/qualidade/execução), perfil (`Conservadora/Equilibrada/Agressiva`) e novos parâmetros na tela de configurações.

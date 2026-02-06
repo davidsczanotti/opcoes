@@ -79,6 +79,19 @@
         IV impl = última do book; IV Rank = faixa 180d; HV (21/63/126/252) = vol. hist. a partir dos snapshots diários.
         IV-HV usa a HV com janela mais próxima do vencimento (quando disponível). Se HV/IV Rank aparecerem vazios, é porque ainda não há histórico suficiente.
       </p>
+      {% if book_availability.show_warning %}
+        <div class="alert alert-{{ book_availability.severity }} py-2 small" role="alert">
+          <strong>Aviso de liquidez:</strong>
+          {% if book_availability.no_tradeable %}
+            Nenhuma opção do filtro tem book completo (bid+ask).
+            Por isso o Top fica vazio e os resultados aparecem na Watchlist (referência teórica/último, sem garantia de execução).
+          {% else %}
+            {{ book_availability.watchlist_count }} de {{ book_availability.total_count }} opções do filtro
+            ({{ "%.0f"|format(book_availability.watchlist_ratio_pct) }}%) estão sem book completo (bid+ask).
+            Trate como Watchlist e valide execução antes de decidir.
+          {% endif %}
+        </div>
+      {% endif %}
       {% if not data.opportunities %}
         <p>Nenhuma opção dentro do filtro de score.</p>
       {% else %}

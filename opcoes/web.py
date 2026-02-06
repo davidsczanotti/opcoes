@@ -343,9 +343,29 @@ def create_app() -> Flask:
                 recurring_days=recur_days,
             )
 
-            fund_target_yield_pct = _parse_form_float(form.get("fund_target_yield_pct"))
+            fund_cfg = get_fundamentus_settings()
+
+            def _form_float_or_default(name: str, current: float) -> float:
+                raw = form.get(name)
+                if raw is None or not str(raw).strip():
+                    return current
+                return _parse_form_float(raw)
+
             update_fundamentus_settings(
-                target_yield_pct=fund_target_yield_pct or 8.0,
+                target_yield_pct=_form_float_or_default("fund_target_yield_pct", fund_cfg.target_yield_pct),
+                put_distance_limit_pct=_form_float_or_default(
+                    "fund_put_distance_limit_pct",
+                    fund_cfg.put_distance_limit_pct,
+                ),
+                put_min_premium_pct=_form_float_or_default(
+                    "fund_put_min_premium_pct",
+                    fund_cfg.put_min_premium_pct,
+                ),
+                put_target_monthly_yield_pct=_form_float_or_default(
+                    "fund_put_target_monthly_yield_pct",
+                    fund_cfg.put_target_monthly_yield_pct,
+                ),
+                put_min_score=_form_float_or_default("fund_put_min_score", fund_cfg.put_min_score),
             )
 
             cash_put_cfg = get_cash_put_settings()

@@ -100,3 +100,56 @@ def test_segment_uses_absolute_delta_for_puts():
     assert [o["ticker"] for o in ctx["segments"]["carteira"]] == ["PUTITM1"]
     assert ctx["segments"]["alavancagem"] == []
     assert ctx["segments"]["aposta"] == []
+
+
+def test_book_availability_alert_when_no_tradeable():
+    data = _base_report()
+    ctx = calculate_ranking_strategy(
+        data=data,
+        min_score=1,
+        limit=10,
+        recurring_days=30,
+        recurring_limit=10,
+        underlying_filter="",
+        option_type_filter="",
+    )
+
+    info = ctx["book_availability"]
+    assert info["total_count"] == 4
+    assert info["tradeable_count"] == 0
+    assert info["watchlist_count"] == 4
+    assert info["show_warning"] is True
+    assert info["no_tradeable"] is True
+    assert info["severity"] == "danger"
+
+
+def test_book_availability_alert_when_mass_missing_book():
+    data = _base_report()
+    data.opportunities = [
+        {"ticker": "OK1", "underlying": "ABCD3", "option_type": "CALL", "best_bid": "1,10", "best_ask": "1,20"},
+        {"ticker": "MISS1", "underlying": "ABCD3", "option_type": "CALL", "best_bid": "", "best_ask": ""},
+        {"ticker": "MISS2", "underlying": "ABCD3", "option_type": "CALL", "best_bid": "", "best_ask": ""},
+    ]
+    data.theoretical_opportunities = [
+        {"ticker": "MISS3", "underlying": "ABCD3", "option_type": "CALL"},
+        {"ticker": "MISS4", "underlying": "ABCD3", "option_type": "CALL"},
+    ]
+
+    ctx = calculate_ranking_strategy(
+        data=data,
+        min_score=1,
+        limit=10,
+        recurring_days=30,
+        recurring_limit=10,
+        underlying_filter="",
+        option_type_filter="",
+    )
+
+    info = ctx["book_availability"]
+    assert info["total_count"] == 5
+    assert info["tradeable_count"] == 1
+    assert info["watchlist_count"] == 4
+    assert info["show_warning"] is True
+    assert info["no_tradeable"] is False
+    assert info["mass_missing"] is True
+    assert info["severity"] == "warning"

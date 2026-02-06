@@ -537,6 +537,31 @@ def fetch_signals(
         conn.close()
 
 
+def fetch_filter_run(
+    *,
+    snapshot_date: Optional[str] = None,
+    db_path: Optional[Path] = None,
+) -> Optional[Dict[str, object]]:
+    conn = _connect(db_path)
+    try:
+        snap = snapshot_date or latest_snapshot_date(db_path=db_path)
+        if not snap:
+            return None
+        row = conn.execute(
+            """
+            SELECT *
+            FROM fundamentus_filter_runs
+            WHERE snapshot_date <= ?
+            ORDER BY snapshot_date DESC
+            LIMIT 1
+            """,
+            (snap,),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
 def fetch_signal_dates(
     *,
     end_date: Optional[str] = None,
@@ -618,6 +643,7 @@ __all__ = [
     "latest_snapshot_date",
     "fetch_snapshot",
     "fetch_signals",
+    "fetch_filter_run",
     "fetch_signal_dates",
     "fetch_approved_ranking",
 ]

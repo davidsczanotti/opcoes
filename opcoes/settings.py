@@ -48,6 +48,10 @@ class CoveredCallSettings:
 @dataclass
 class FundamentusSettings:
     target_yield_pct: float = 8.0
+    put_distance_limit_pct: float = 15.0
+    put_min_premium_pct: float = 0.5
+    put_target_monthly_yield_pct: float = 1.0
+    put_min_score: float = 4.0
 
 
 def _connect() -> sqlite3.Connection:
@@ -230,6 +234,10 @@ def get_fundamentus_settings() -> FundamentusSettings:
 
     return FundamentusSettings(
         target_yield_pct=_parse_float("fund_target_yield_pct", 8.0),
+        put_distance_limit_pct=_parse_float("fund_put_distance_limit_pct", 15.0),
+        put_min_premium_pct=_parse_float("fund_put_min_premium_pct", 0.5),
+        put_target_monthly_yield_pct=_parse_float("fund_put_target_monthly_yield_pct", 1.0),
+        put_min_score=_parse_float("fund_put_min_score", 4.0),
     )
 
 
@@ -363,11 +371,22 @@ def update_covered_call_settings(
         conn.close()
 
 
-def update_fundamentus_settings(*, target_yield_pct: float) -> None:
+def update_fundamentus_settings(
+    *,
+    target_yield_pct: float,
+    put_distance_limit_pct: float,
+    put_min_premium_pct: float,
+    put_target_monthly_yield_pct: float,
+    put_min_score: float,
+) -> None:
     conn = _connect()
     try:
         params = {
             "fund_target_yield_pct": float(target_yield_pct),
+            "fund_put_distance_limit_pct": float(put_distance_limit_pct),
+            "fund_put_min_premium_pct": float(put_min_premium_pct),
+            "fund_put_target_monthly_yield_pct": float(put_target_monthly_yield_pct),
+            "fund_put_min_score": float(put_min_score),
         }
         for key, value in params.items():
             conn.execute(
