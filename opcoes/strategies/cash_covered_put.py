@@ -478,9 +478,21 @@ def get_cash_covered_put_context(args: Mapping[str, Any]) -> Dict[str, Any]:
         ),
     }
     # Prêmios líquidos por mês (PREMIUM - DARF) via caixa (ledger).
-    monthly_premiums = finance.get_monthly_premiums(include_darf=True, is_simulated=False)
-    simulated_monthly_premiums = finance.get_monthly_premiums(include_darf=True, is_simulated=True) or ctx.get("simulated_monthly_premiums_fallback", [])
-    transactions = finance.get_transactions(limit=10)
+    monthly_premiums = finance.get_monthly_premiums(
+        include_darf=True,
+        is_simulated=False,
+        strategy_tag="cash_put",
+    )
+    simulated_monthly_premiums = finance.get_monthly_premiums(
+        include_darf=True,
+        is_simulated=True,
+        strategy_tag="cash_put",
+    ) or ctx.get("simulated_monthly_premiums_fallback", [])
+    transactions = finance.get_transactions(
+        limit=10,
+        strategy_tag="cash_put",
+        include_unlinked=True,
+    )
 
     return {
         **ctx,

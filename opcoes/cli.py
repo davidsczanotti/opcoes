@@ -116,7 +116,7 @@ def parse_args() -> argparse.Namespace:
         "--resume-file",
         type=Path,
         default=None,
-        help="Arquivo de progresso da retomada (default: <output>.progress.json).",
+        help="Arquivo SQLite de checkpoint da retomada (default: <output>.checkpoint.db).",
     )
 
     ec = sub.add_parser("enrich", help="Enriquece um CSV existente com E/P e P/L")

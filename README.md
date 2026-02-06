@@ -56,11 +56,13 @@ poetry run python -m opcoes.cli scrape --output data/opcoes_latest.csv --headful
 ```
 - Retomar coleta interrompida (checkpoint automatico):
 O scraper agora salva progresso automaticamente e retoma na proxima execucao, sem flag.
-Opcional: `--resume-file caminho/para/progresso.json`. O scraper cria `<output>.progress.json` e `<output>.checkpoint.csv` e remove ambos ao final com sucesso.
+Opcional: `--resume-file caminho/para/checkpoint.db`. Por padrao, o scraper cria `<output>.checkpoint.db`.
 Regras da retomada:
-- O checkpoint so e reaproveitado se `--output` e a lista de simbolos forem iguais a execucao original.
-- Se mudar `--symbols`, `--max-symbols` ou `--output`, o scraper ignora o checkpoint e inicia do zero.
-- Se o checkpoint de linhas estiver vazio, ele reinicia a coleta completa por segurança.
+- O checkpoint so e reaproveitado se `--output` for o mesmo da execucao original.
+- A validacao da lista de simbolos na retomada ignora ordem e duplicidades (usa assinatura canonica).
+- Se a lista atual mudou parcialmente, o scraper reconcilia simbolos/linhas no checkpoint e continua pelos simbolos restantes, sem reset total.
+- Se mudar `--output`, o scraper ignora o checkpoint e inicia do zero.
+- Use `--no-resume` para desativar checkpoint nesta execucao.
 - Backfill de preços (HV/IV Rank):
 ```bash
 poetry run python -m opcoes.cli scrape --backfill-days 120
@@ -178,7 +180,7 @@ Páginas principais:
 - `data/opcoes_snapshots.db`: snapshots, posições, rankings e histórico.
 - `data/iv_history.db`: histórico de IV.
 - `data/flow_history.db`: histórico de fluxo.
-- `data/opcoes_latest.progress.json` e `data/opcoes_latest.checkpoint.csv`: criados automaticamente para permitir retomada sem perder progresso.
+- `data/opcoes_latest.checkpoint.db`: checkpoint transacional da coleta (retomada por símbolo).
 
 ## Variáveis de ambiente
 - `OPCOES_DB_PATH`: define outro caminho para o SQLite (default: `data/opcoes_snapshots.db`).
@@ -201,3 +203,7 @@ Sem `RUN_E2E_TESTS`, os testes e2e são ignorados.
   - Segmentação de ranking por delta usando `abs(delta)` (corrige classificação de PUTs).
   - Cálculo de prêmio/DARF centralizado e DARF sempre arredondado em centavos.
   - Relatório fiscal (`tax`) agora suporta filtro de modo `real/simulated/all`.
+  - Recalculo final do snapshot consolidado para `iv_rank_180d`, `iv_score`, `vol_fluxo_5d` e `score_total` (evita divergência em retomadas/checkpoints).
+  - `iv_history.db` e `flow_history.db` agora seguem o mesmo diretório do `OPCOES_DB_PATH`, evitando mistura entre contextos.
+  - Retomada do scraper migrada para checkpoint SQLite transacional por símbolo (mais resiliente a quedas e reinícios).
+  - Aba `Cash-Covered Put` agora filtra prêmios/movimentações por estratégia (`cash_put`) para não misturar lançamentos de `covered_call`.

@@ -27,6 +27,7 @@ class Transaction:
     description: Optional[str] = None
     position_id: Optional[int] = None  # Link opcional com uma posição específica
     is_simulated: bool = False
+    position_strategy_tag: Optional[str] = None
 
 
 def _get_conn() -> sqlite3.Connection:
@@ -69,6 +70,18 @@ def _ensure_table(conn: sqlite3.Connection, *, commit: bool) -> None:
         conn.execute('ALTER TABLE ledger ADD COLUMN "is_simulated" INTEGER DEFAULT 0')
     if commit:
         conn.commit()
+
+
+def _normalize_strategy_tag(value: Optional[str]) -> Optional[str]:
+    text = (value or "").strip().lower()
+    return text or None
+
+
+def _has_positions_table(conn: sqlite3.Connection) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'positions' LIMIT 1"
+    ).fetchone()
+    return row is not None
 
 
 def option_tax_rate(trade_type: str) -> float:
@@ -141,6 +154,7 @@ def get_monthly_premiums(
     *,
     is_simulated: Optional[bool] = False,
     include_darf: bool = False,
+    strategy_tag: Optional[str] = None,
 ) -> List[dict]:
     """Retorna soma de prêmios agrupados por mês (YYYY-MM).
 
@@ -149,22 +163,33 @@ def get_monthly_premiums(
     """
     conn = _get_conn()
     try:
+        strategy = _normalize_strategy_tag(strategy_tag)
         where: list[str] = []
         params: list[object] = []
+        use_strategy_filter = strategy is not None
+        if use_strategy_filter and not _has_positions_table(conn):
+            return []
         if include_darf:
             # DARF de provisão é lançado com position_id; evita misturar com DARF "pago" (manual).
-            where.append("(type = ? OR (type = ? AND position_id IS NOT NULL))")
+            where.append("(l.type = ? OR (l.type = ? AND l.position_id IS NOT NULL))")
             params.extend([TransactionType.PREMIUM.value, TransactionType.DARF.value])
         else:
-            where.append("type = ?")
+            where.append("l.type = ?")
             params.append(TransactionType.PREMIUM.value)
         if is_simulated is not None:
-            where.append("COALESCE(is_simulated, 0) = ?")
+            where.append("COALESCE(l.is_simulated, 0) = ?")
             params.append(1 if is_simulated else 0)
+        if use_strategy_filter:
+            where.append("l.position_id IS NOT NULL")
+            where.append("COALESCE(LOWER(p.strategy_tag), '') = ?")
+            params.append(strategy)
+            from_clause = "FROM ledger l LEFT JOIN positions p ON p.id = l.position_id"
+        else:
+            from_clause = "FROM ledger l"
 
         query = f"""
-            SELECT strftime('%Y-%m', date) as month, SUM(amount) as total
-            FROM ledger
+            SELECT strftime('%Y-%m', l.date) as month, SUM(l.amount) as total
+            {from_clause}
             WHERE {' AND '.join(where)}
             GROUP BY month
             ORDER BY month DESC
@@ -178,12 +203,55 @@ def get_monthly_premiums(
         conn.close()
 
 
-def get_transactions(limit: int = 50) -> List[Transaction]:
+def get_transactions(
+    limit: int = 50,
+    *,
+    is_simulated: Optional[bool] = None,
+    strategy_tag: Optional[str] = None,
+    include_unlinked: bool = True,
+) -> List[Transaction]:
     conn = _get_conn()
     try:
-        rows = conn.execute(
-            "SELECT * FROM ledger ORDER BY date DESC, id DESC LIMIT ?", (limit,)
-        ).fetchall()
+        where: list[str] = []
+        params: list[object] = []
+        strategy = _normalize_strategy_tag(strategy_tag)
+        has_positions = _has_positions_table(conn)
+
+        if is_simulated is not None:
+            where.append("COALESCE(l.is_simulated, 0) = ?")
+            params.append(1 if is_simulated else 0)
+
+        if strategy:
+            if has_positions:
+                if include_unlinked:
+                    where.append("(l.position_id IS NULL OR COALESCE(LOWER(p.strategy_tag), '') = ?)")
+                else:
+                    where.append("COALESCE(LOWER(p.strategy_tag), '') = ?")
+                params.append(strategy)
+            elif include_unlinked:
+                where.append("l.position_id IS NULL")
+            else:
+                return []
+
+        where_clause = f"WHERE {' AND '.join(where)}" if where else ""
+        if has_positions:
+            query = f"""
+                SELECT l.*, p.strategy_tag AS position_strategy_tag
+                FROM ledger l
+                LEFT JOIN positions p ON p.id = l.position_id
+                {where_clause}
+                ORDER BY l.date DESC, l.id DESC
+                LIMIT ?
+            """
+        else:
+            query = f"""
+                SELECT l.*
+                FROM ledger l
+                {where_clause}
+                ORDER BY l.date DESC, l.id DESC
+                LIMIT ?
+            """
+        rows = conn.execute(query, (*params, int(limit))).fetchall()
         return [
             Transaction(
                 id=r["id"],
@@ -193,6 +261,7 @@ def get_transactions(limit: int = 50) -> List[Transaction]:
                 description=r["description"],
                 position_id=r["position_id"],
                 is_simulated=bool(r["is_simulated"] or 0) if "is_simulated" in r.keys() else False,
+                position_strategy_tag=(r["position_strategy_tag"] if "position_strategy_tag" in r.keys() else None),
             )
             for r in rows
         ]

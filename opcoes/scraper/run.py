@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import math
 import re
 import statistics
@@ -37,15 +38,8 @@ from .prices import PriceIndicators, fetch_price_indicators
 from .ivrank import IVRankStore
 from .activity import FlowStore
 from .snapshots import SnapshotDB
+from .checkpoint import ScrapeCheckpointStore, default_checkpoint_db_path
 from .far_expirations import fetch_far_expiration_quotes
-from .progress import (
-    PROGRESS_VERSION,
-    default_checkpoint_path,
-    default_progress_path,
-    load_checkpoint_rows,
-    load_progress,
-    save_progress,
-)
 from ..utils import infer_option_type, format_decimal as _format_decimal
 from .. import quant
 from .health import check_health
@@ -56,6 +50,60 @@ from ..config import get_db_path
 # None -> seleciona todos os vencimentos disponíveis.
 MAX_VENCIMENTOS: Optional[int] = None
 PROCESSING_OVERLAY = "#tblListaOpc_processing"
+
+
+def _history_store_path(filename: str) -> Path:
+    """Resolve arquivos auxiliares ao lado do DB principal para evitar contexto misto."""
+
+    db_path = get_db_path().expanduser()
+    if not db_path.is_absolute():
+        db_path = (Path.cwd() / db_path).resolve()
+    return db_path.parent / filename
+
+
+def _normalize_symbol_list(symbols: Sequence[str]) -> List[str]:
+    normalized: List[str] = []
+    seen: Set[str] = set()
+    for symbol in symbols:
+        key = (symbol or "").strip().upper()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        normalized.append(key)
+    return normalized
+
+
+def _symbols_signature(symbols: Sequence[str]) -> str:
+    canonical = "|".join(sorted(_normalize_symbol_list(symbols)))
+    return hashlib.sha1(canonical.encode("utf-8")).hexdigest()
+
+
+def _resume_symbols_match(
+    target_symbols: Sequence[str],
+    saved_symbols: Sequence[str],
+    saved_signature: Optional[str],
+) -> bool:
+    target_norm = _normalize_symbol_list(target_symbols)
+    if saved_signature:
+        return saved_signature == _symbols_signature(target_norm)
+    saved_norm = _normalize_symbol_list(saved_symbols)
+    return set(target_norm) == set(saved_norm)
+
+
+def _filter_processed_for_target(
+    processed_symbols: Sequence[str],
+    target_symbols: Sequence[str],
+) -> List[str]:
+    target_set = set(_normalize_symbol_list(target_symbols))
+    filtered: List[str] = []
+    seen: Set[str] = set()
+    for symbol in processed_symbols:
+        key = (symbol or "").strip().upper()
+        if not key or key not in target_set or key in seen:
+            continue
+        seen.add(key)
+        filtered.append(key)
+    return filtered
 
 
 async def scrape_all(
@@ -76,16 +124,13 @@ async def scrape_all(
     existing_tickers = load_existing_tickers(output_csv)
     rows_to_write: List[Dict[str, str]] = []
     rows_to_write_tickers: Set[str] = set()
-    progress: Optional[Dict[str, object]] = None
     processed_symbols: Set[str] = set()
-    processed_symbols_list: List[str] = []
-    progress_file: Optional[Path] = None
-    checkpoint_file: Optional[Path] = None
-    checkpoint_existing_tickers: Set[str] = set()
+    checkpoint_store: Optional[ScrapeCheckpointStore] = None
+    checkpoint_path: Optional[Path] = None
     resume_snapshot_date: Optional[str] = None
     snapshot_rows: List[Dict[str, str]] = []
     fundamentals_map: Dict[str, tuple] = {}
-    resume_enabled = True
+    resume_enabled = bool(resume)
 
     def _track_row(row: Dict[str, str]) -> bool:
         ticker = str(row.get("ticker") or "").strip().upper()
@@ -154,8 +199,10 @@ async def scrape_all(
 
         available = await _collect_symbols(page)
         target_symbols = _filter_symbols(available, symbols)
+        target_symbols = _normalize_symbol_list(target_symbols)
         if max_symbols is not None:
             target_symbols = target_symbols[:max_symbols]
+        target_symbols_signature = _symbols_signature(target_symbols)
 
         if not target_symbols:
             print("Nenhum papel selecionado.")
@@ -163,71 +210,24 @@ async def scrape_all(
             return
 
         if resume_enabled:
-            progress_file = Path(progress_path) if progress_path else default_progress_path(output_csv)
-            progress = load_progress(progress_file)
-            if progress:
-                if progress.get("version") != PROGRESS_VERSION:
-                    print(
-                        "Aviso: arquivo de retomada em formato antigo. "
-                        "Ignorando checkpoint e iniciando do zero."
-                    )
-                    progress = None
-                else:
-                    saved_output = str(progress.get("output_csv") or "")
-                    expected_output = str(output_csv.resolve())
-                    saved_symbols = progress.get("symbols")
-                    if saved_output and saved_output != expected_output:
-                        print(
-                            "Aviso: arquivo de retomada aponta para outro CSV. "
-                            "Ignorando checkpoint e iniciando do zero."
-                        )
-                        progress = None
-                    elif saved_symbols and list(saved_symbols) != list(target_symbols):
-                        print(
-                            "Aviso: lista de simbolos da retomada nao bate com esta execucao. "
-                            "Ignorando checkpoint e iniciando do zero."
-                        )
-                        progress = None
-            if progress:
-                checkpoint_file = Path(progress.get("checkpoint_csv") or default_checkpoint_path(output_csv))
-                processed_symbols_list = [
-                    s for s in progress.get("processed_symbols", []) if isinstance(s, str)
-                ]
-                processed_symbols = set(processed_symbols_list)
-                snapshot_rows = load_checkpoint_rows(checkpoint_file)
-                if snapshot_rows:
-                    for row in snapshot_rows:
-                        _track_row(row)
-                if processed_symbols and not snapshot_rows:
-                    print(
-                        "Aviso: checkpoint de linhas vazio. A retomada vai coletar tudo novamente."
-                    )
-                    processed_symbols.clear()
-                    processed_symbols_list = []
-                if progress.get("snapshot_date"):
-                    resume_snapshot_date = str(progress.get("snapshot_date"))
-                print(
-                    "Retomando coleta: "
-                    f"{len(processed_symbols)}/{len(target_symbols)} simbolos ja concluidos."
-                )
-            else:
-                checkpoint_file = default_checkpoint_path(output_csv)
-                progress = {
-                    "version": PROGRESS_VERSION,
-                    "output_csv": str(output_csv.resolve()),
-                    "checkpoint_csv": str(checkpoint_file.resolve()),
-                    "symbols": list(target_symbols),
-                    "processed_symbols": [],
-                    "snapshot_date": None,
-                    "started_at": dt.datetime.now().isoformat(timespec="seconds"),
-                    "updated_at": dt.datetime.now().isoformat(timespec="seconds"),
-                }
-                save_progress(progress_file, progress)
-                print(
-                    "Checkpoint ativado automaticamente. Se o scraper for interrompido, "
-                    f"basta rodar novamente. Progresso: {progress_file}"
-                )
-            checkpoint_existing_tickers = load_existing_tickers(checkpoint_file) if checkpoint_file else set()
+            checkpoint_path = Path(progress_path) if progress_path else default_checkpoint_db_path(output_csv)
+            checkpoint_store = ScrapeCheckpointStore(checkpoint_path)
+            checkpoint_state = checkpoint_store.prepare(
+                output_csv=output_csv,
+                target_symbols=target_symbols,
+                symbols_signature=target_symbols_signature,
+            )
+            processed_symbols = set(checkpoint_state.processed_symbols)
+            resume_snapshot_date = checkpoint_state.snapshot_date
+            snapshot_rows = list(checkpoint_state.snapshot_rows)
+            if snapshot_rows:
+                for row in snapshot_rows:
+                    _track_row(row)
+            print(
+                "Retomando coleta: "
+                f"{len(processed_symbols)}/{len(target_symbols)} simbolos ja concluidos."
+            )
+            print(f"Checkpoint SQLite ativo: {checkpoint_path}")
 
         total_written = 0
         total_symbols = len(target_symbols)
@@ -253,13 +253,13 @@ async def scrape_all(
             snapshot_date = resume_snapshot_date
         iv_store: Optional[IVRankStore] = None
         try:
-            iv_store = IVRankStore(Path("data/iv_history.db"))
+            iv_store = IVRankStore(_history_store_path("iv_history.db"))
         except Exception as exc:  # noqa: BLE001
             print(f"Aviso: falhou inicializar histórico de IV: {exc}")
             iv_store = None
         flow_store: Optional[FlowStore] = None
         try:
-            flow_store = FlowStore(Path("data/flow_history.db"))
+            flow_store = FlowStore(_history_store_path("flow_history.db"))
         except Exception as exc:  # noqa: BLE001
             print(f"Aviso: falhou histórico de fluxo: {exc}")
             flow_store = None
@@ -282,9 +282,12 @@ async def scrape_all(
                 print(f"[{idx}/{total_symbols}] {symbol} ja coletado. Pulando.")
                 continue
             print(f"[{idx}/{total_symbols}] Processando {symbol}…")
+            if checkpoint_store:
+                checkpoint_store.mark_symbol_running(output_csv=output_csv, symbol=symbol)
             if page.is_closed():
                 await _reset_browser()
             rows = None
+            last_error = ""
             for attempt in range(2):
                 try:
                     rows = await _scrape_symbol(
@@ -296,6 +299,7 @@ async def scrape_all(
                     )
                     break
                 except Exception as exc:  # noqa: BLE001 – queremos continuar
+                    last_error = str(exc)
                     if _is_target_closed(exc) and attempt == 0:
                         print("  -> navegador fechou. Reiniciando e tentando novamente...")
                         await _reset_browser()
@@ -303,10 +307,24 @@ async def scrape_all(
                     print(f"  -> erro ao processar {symbol}: {exc}")
                     break
             if rows is None:
+                if checkpoint_store:
+                    checkpoint_store.mark_symbol_failed(
+                        output_csv=output_csv,
+                        symbol=symbol,
+                        error=last_error or "falha sem detalhe",
+                    )
                 continue
 
             if not rows:
                 print("  -> sem resultados.")
+                if checkpoint_store:
+                    checkpoint_store.mark_symbol_success(
+                        output_csv=output_csv,
+                        symbol=symbol,
+                        rows=[],
+                        snapshot_date=None,
+                    )
+                    processed_symbols.add(symbol)
                 continue
 
             # Fallback/auditoria: tenta completar bid/ask via Yahoo Finance
@@ -455,70 +473,18 @@ async def scrape_all(
                     r["prob_be_pct"] = ""
                     r["Status_Remoto"] = ""
 
-            iv_summary = _summarize_iv(rows)
-            iv_ranks: Dict[Tuple[str, str], Optional[float]] = {}
-            if iv_store and iv_summary:
-                entries = [
-                    (key_underlying, key_venc, snapshot_date, value)
-                    for (key_underlying, key_venc), value in iv_summary.items()
-                    if value is not None
-                ]
-                iv_store.record_many(entries)
-                for (key_underlying, key_venc), value in iv_summary.items():
-                    if value is None:
-                        continue
-                    rank = iv_store.rank_for(key_underlying, key_venc, snapshot_date, value)
-                    iv_ranks[(key_underlying, key_venc)] = rank
-
-            flow_records: List[Tuple[str, str, Optional[float], Optional[float]]] = []
-            flow_ratios: Dict[str, Tuple[Optional[float], Optional[float]]] = {}
-            if flow_store:
-                for r in rows:
-                    ticker = _normalize_ticker(r.get("ticker"))
-                    if not ticker:
-                        continue
-                    vol = _parse_float(r.get("vol_financeiro"))
-                    num = _parse_float(r.get("num_neg"))
-                    if vol is None and num is None:
-                        continue
-                    avg_vol, avg_num = flow_store.averages(ticker, snapshot_date)
-                    ratio_vol = vol / avg_vol if avg_vol and vol is not None and avg_vol > 0 else None
-                    ratio_num = num / avg_num if avg_num and num is not None and avg_num > 0 else None
-                    flow_ratios[ticker] = (ratio_vol, ratio_num)
-                    flow_records.append((ticker, snapshot_date, vol, num))
-                flow_store.record_many(flow_records)
-
             for r in rows:
-                ticker_key = _normalize_ticker(r.get("ticker"))
-                ratios = flow_ratios.get(ticker_key)
-                if ratios:
-                    vol_ratio, num_ratio = ratios
-                    r["vol_fluxo_5d"] = _format_decimal(vol_ratio, decimals=2, signed=False) if vol_ratio is not None else ""
-                    r["num_fluxo_5d"] = _format_decimal(num_ratio, decimals=2, signed=False) if num_ratio is not None else ""
-                else:
-                    r["vol_fluxo_5d"] = ""
-                    r["num_fluxo_5d"] = ""
-
-            for r in rows:
-                key = (_normalize_underlying(r.get("underlying")), r.get("vencimento", ""))
-                rank = iv_ranks.get(key)
-                iv_pts = 0.0
-                if rank is not None:
-                    rank_str = _format_decimal(rank, decimals=1, signed=False)
-                    iv_pts = quant.score_iv_rank(rank, _parse_float(r.get("vol_impl_perc")))
-                    r["iv_rank_180d"] = rank_str
-                    r["iv_score"] = _format_decimal(iv_pts, decimals=2, signed=False)
-                else:
-                    r["iv_rank_180d"] = ""
-                    r["iv_score"] = ""
-
+                r["vol_fluxo_5d"] = ""
+                r["num_fluxo_5d"] = ""
+                r["iv_rank_180d"] = ""
+                r["iv_score"] = ""
                 final_score = quant.calculate_weighted_score(
                     moneyness_score=_parse_float(r.get("moneyness_score")) or 0.0,
                     prob_itm_pct=_parse_float(r.get("prob_itm_pct")),
                     prob_itm_delta_pct=_parse_float(r.get("prob_itm_delta_pct")),
                     extrinsic_pct_spot=_parse_float(r.get("extrinsic_pct_spot")),
                     liquidity_score=_parse_float(r.get("liquidez_score")) or 0.0,
-                    iv_score=iv_pts,
+                    iv_score=0.0,
                     theta_score=_parse_float(r.get("theta_score")) or 0.0,
                     em2x_score=_parse_float(r.get("em2x_score")) or 0.0,
                     double_score=_parse_float(r.get("dobro_score")) or 0.0,
@@ -535,44 +501,65 @@ async def scrape_all(
             total_written += new_for_symbol
             print(f"  -> {len(rows)} linhas coletadas (novas: {new_for_symbol}).")
 
-            if resume_enabled and progress and progress_file and checkpoint_file:
-                append_rows_dedup(checkpoint_file, rows, checkpoint_existing_tickers)
-                if symbol not in processed_symbols:
-                    processed_symbols.add(symbol)
-                    processed_symbols_list.append(symbol)
-                resume_snapshot_date = _max_snapshot_date(
-                    resume_snapshot_date, _infer_snapshot_date(rows)
+            if checkpoint_store:
+                symbol_snapshot_date = _infer_snapshot_date(rows)
+                checkpoint_store.mark_symbol_success(
+                    output_csv=output_csv,
+                    symbol=symbol,
+                    rows=rows,
+                    snapshot_date=symbol_snapshot_date,
                 )
-                progress["processed_symbols"] = processed_symbols_list
-                progress["snapshot_date"] = resume_snapshot_date
-                progress["updated_at"] = dt.datetime.now().isoformat(timespec="seconds")
-                progress["last_symbol"] = symbol
-                save_progress(progress_file, progress)
+                processed_symbols.add(symbol)
+                resume_snapshot_date = _max_snapshot_date(
+                    resume_snapshot_date, symbol_snapshot_date
+                )
 
         await browser.close()
-        if iv_store:
-            iv_store.close()
-        if flow_store:
-            flow_store.close()
         detected_snapshot_date = _infer_snapshot_date(snapshot_rows) or resume_snapshot_date
         if detected_snapshot_date:
             snapshot_date = detected_snapshot_date
+        _recalculate_snapshot_metrics(
+            snapshot_rows,
+            snapshot_date=snapshot_date,
+            iv_store=iv_store,
+            flow_store=flow_store,
+        )
         _apply_execution_penalties(snapshot_rows, snapshot_date)
         if snapshot_db:
             snapshot_db.record_underlyings(snapshot_date, price_map, target_symbols)
             snapshot_db.record_options(snapshot_date, snapshot_rows)
             snapshot_db.close()
+        if iv_store:
+            iv_store.close()
+        if flow_store:
+            flow_store.close()
         # Grava CSV apenas ao final para que score_total reflita penalidades dependentes da data do snapshot.
         if rows_to_write:
             total_written = append_rows_dedup(output_csv, rows_to_write, existing_tickers)
         print(f"Concluído. Novos registros gravados: {total_written}. Arquivo: {output_csv}")
 
-        if resume_enabled and progress_file:
-            with contextlib.suppress(Exception):
-                progress_file.unlink()
-            if checkpoint_file:
+        if checkpoint_store:
+            counts = checkpoint_store.status_counts(output_csv=output_csv, target_symbols=target_symbols)
+            complete_checkpoint = checkpoint_store.is_complete(
+                output_csv=output_csv,
+                target_symbols=target_symbols,
+            )
+            if complete_checkpoint:
+                checkpoint_store.clear(output_csv=output_csv)
+                print(
+                    "Checkpoint finalizado e limpo "
+                    f"(concluidos: {counts['done']}/{counts['total']})."
+                )
+            else:
+                print(
+                    "Checkpoint mantido para retomada "
+                    f"(concluidos: {counts['done']}/{counts['total']}, "
+                    f"falhas: {counts['failed']}, pendentes: {counts['pending'] + counts['running']})."
+                )
+            checkpoint_store.close()
+            if complete_checkpoint and checkpoint_path:
                 with contextlib.suppress(Exception):
-                    checkpoint_file.unlink()
+                    checkpoint_path.unlink()
 
 
 async def _scrape_symbol(
@@ -1226,6 +1213,87 @@ def _apply_penalties(row: Dict[str, str]) -> None:
     if be_dist is not None and abs(be_dist) > 15.0:
         score = max(0.0, score - 2.0)
     row["score_total"] = _format_decimal(score, decimals=2, signed=False)
+
+
+def _recalculate_snapshot_metrics(
+    rows: Sequence[Dict[str, str]],
+    *,
+    snapshot_date: str,
+    iv_store: Optional[IVRankStore],
+    flow_store: Optional[FlowStore],
+) -> None:
+    if not rows:
+        return
+
+    flow_ratios: Dict[str, Tuple[Optional[float], Optional[float]]] = {}
+    flow_records: List[Tuple[str, str, Optional[float], Optional[float]]] = []
+    if flow_store:
+        for r in rows:
+            ticker = _normalize_ticker(r.get("ticker"))
+            if not ticker:
+                continue
+            vol = _parse_float(r.get("vol_financeiro"))
+            num = _parse_float(r.get("num_neg"))
+            if vol is None and num is None:
+                continue
+            avg_vol, avg_num = flow_store.averages(ticker, snapshot_date)
+            ratio_vol = vol / avg_vol if avg_vol and vol is not None and avg_vol > 0 else None
+            ratio_num = num / avg_num if avg_num and num is not None and avg_num > 0 else None
+            flow_ratios[ticker] = (ratio_vol, ratio_num)
+            flow_records.append((ticker, snapshot_date, vol, num))
+        flow_store.record_many(flow_records)
+
+    iv_ranks: Dict[Tuple[str, str], Optional[float]] = {}
+    iv_summary = _summarize_iv(rows)
+    if iv_store and iv_summary:
+        entries = [
+            (key_underlying, key_venc, snapshot_date, value)
+            for (key_underlying, key_venc), value in iv_summary.items()
+            if value is not None
+        ]
+        iv_store.record_many(entries)
+        for (key_underlying, key_venc), value in iv_summary.items():
+            if value is None:
+                continue
+            rank = iv_store.rank_for(key_underlying, key_venc, snapshot_date, value)
+            iv_ranks[(key_underlying, key_venc)] = rank
+
+    for r in rows:
+        ticker_key = _normalize_ticker(r.get("ticker"))
+        ratios = flow_ratios.get(ticker_key)
+        if ratios:
+            vol_ratio, num_ratio = ratios
+            r["vol_fluxo_5d"] = _format_decimal(vol_ratio, decimals=2, signed=False) if vol_ratio is not None else ""
+            r["num_fluxo_5d"] = _format_decimal(num_ratio, decimals=2, signed=False) if num_ratio is not None else ""
+        else:
+            r["vol_fluxo_5d"] = ""
+            r["num_fluxo_5d"] = ""
+
+        key = (_normalize_underlying(r.get("underlying")), (r.get("vencimento") or "").strip())
+        rank = iv_ranks.get(key)
+        iv_pts = 0.0
+        if rank is not None:
+            r["iv_rank_180d"] = _format_decimal(rank, decimals=1, signed=False)
+            iv_pts = quant.score_iv_rank(rank, _parse_float(r.get("vol_impl_perc")))
+            r["iv_score"] = _format_decimal(iv_pts, decimals=2, signed=False)
+        else:
+            r["iv_rank_180d"] = ""
+            r["iv_score"] = ""
+
+        final_score = quant.calculate_weighted_score(
+            moneyness_score=_parse_float(r.get("moneyness_score")) or 0.0,
+            prob_itm_pct=_parse_float(r.get("prob_itm_pct")),
+            prob_itm_delta_pct=_parse_float(r.get("prob_itm_delta_pct")),
+            extrinsic_pct_spot=_parse_float(r.get("extrinsic_pct_spot")),
+            liquidity_score=_parse_float(r.get("liquidez_score")) or 0.0,
+            iv_score=iv_pts,
+            theta_score=_parse_float(r.get("theta_score")) or 0.0,
+            em2x_score=_parse_float(r.get("em2x_score")) or 0.0,
+            double_score=_parse_float(r.get("dobro_score")) or 0.0,
+            status_remote=r.get("Status_Remoto") or "",
+        )
+        r["score_total"] = _format_decimal(final_score, decimals=2, signed=False)
+        _apply_penalties(r)
 
 
 def _apply_execution_penalties(rows: Sequence[Dict[str, str]], snapshot_date: str) -> None:

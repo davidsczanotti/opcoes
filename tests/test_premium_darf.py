@@ -136,6 +136,42 @@ def test_record_premium_with_darf_provision(monkeypatch, tmp_path) -> None:
         assert monthly_net[-1]["month"] == "2025-01"
         assert abs(float(monthly_net[-1]["total"]) - (gross * (1 - 0.15) + gross * (1 - 0.20))) < 1e-6
 
+        monthly_cash_put = finance.get_monthly_premiums(
+            limit_months=12,
+            is_simulated=sim,
+            include_darf=True,
+            strategy_tag="cash_put",
+        )
+        assert monthly_cash_put
+        assert abs(float(monthly_cash_put[-1]["total"]) - (gross * (1 - 0.15))) < 1e-6
+
+        monthly_covered_call = finance.get_monthly_premiums(
+            limit_months=12,
+            is_simulated=sim,
+            include_darf=True,
+            strategy_tag="covered_call",
+        )
+        assert monthly_covered_call
+        assert abs(float(monthly_covered_call[-1]["total"]) - (gross * (1 - 0.20))) < 1e-6
+
+        txs_cash_put = finance.get_transactions(
+            limit=50,
+            is_simulated=sim,
+            strategy_tag="cash_put",
+            include_unlinked=False,
+        )
+        assert txs_cash_put
+        assert all(t.position_id == put_pos["id"] for t in txs_cash_put)
+
+        txs_covered_call = finance.get_transactions(
+            limit=50,
+            is_simulated=sim,
+            strategy_tag="covered_call",
+            include_unlinked=False,
+        )
+        assert txs_covered_call
+        assert all(t.position_id == call_pos["id"] for t in txs_covered_call)
+
 
 def test_record_premium_darf_is_rounded_to_cents(monkeypatch, tmp_path) -> None:
     db_path = tmp_path / "premium_darf_rounding.db"
