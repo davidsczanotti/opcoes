@@ -211,3 +211,4 @@ Sem `RUN_E2E_TESTS`, os testes e2e são ignorados.
   - Aba `Ranking` agora exibe alerta didático automático quando faltar `bid+ask` em massa (ou 100% dos casos), explicando por que o Top pode ficar vazio e os itens irem para Watchlist.
   - Aba `Fundamentus` agora traduz motivos de reprovação para texto didático, mostra alerta de defasagem entre snapshots e prioriza preço conservador em PUT (`best_bid` antes de `ultimo`).
   - Ranking de PUTs na aba `Fundamentus` ganhou score didático (segurança/renda/qualidade/execução), perfil (`Conservadora/Equilibrada/Agressiva`) e novos parâmetros na tela de configurações.
+  - Aba `Posições` ganhou novos motivos de encerramento/parcial no dropdown (`Recompra para encerrar`, `Rolagem`, `Exercício`, `Vencimento sem valor`, `Ajuste manual`), mantendo compatibilidade com motivos antigos já salvos.

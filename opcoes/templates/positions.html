@@ -326,11 +326,17 @@
                           </div>
                           <div class="flex-fill">
                             <small>Motivo</small>
+                            {% set reason_norm = (pos.exit_reason or '')|trim|lower %}
                             <select name="exit_reason" class="form-select form-select-sm">
                               <option value="" {% if not pos.exit_reason %}selected{% endif %}>-</option>
                               <option value="stop" {% if pos.exit_reason == 'stop' %}selected{% endif %}>Stop</option>
                               <option value="parcial" {% if pos.exit_reason == 'parcial' %}selected{% endif %}>Parcial</option>
                               <option value="alvo" {% if pos.exit_reason == 'alvo' %}selected{% endif %}>Alvo</option>
+                              <option value="recompra_encerramento" {% if pos.exit_reason == 'recompra_encerramento' %}selected{% endif %}>Recompra para encerrar</option>
+                              <option value="rolagem" {% if pos.exit_reason == 'rolagem' %}selected{% endif %}>Rolagem</option>
+                              <option value="exercicio" {% if reason_norm in ['exercicio', 'exercício'] %}selected{% endif %}>Exercício</option>
+                              <option value="vencimento_sem_valor" {% if reason_norm in ['vencimento_sem_valor', 'expiracao', 'expiração'] %}selected{% endif %}>Vencimento sem valor</option>
+                              <option value="ajuste_manual" {% if pos.exit_reason == 'ajuste_manual' %}selected{% endif %}>Ajuste manual</option>
                               <option value="outro" {% if pos.exit_reason == 'outro' %}selected{% endif %}>Outro</option>
                             </select>
                           </div>
