@@ -352,7 +352,7 @@
                     <td style="min-width: 200px;">
                       <div class="d-flex flex-wrap gap-1 mb-1">
                         <button class="btn btn-success btn-sm" type="submit">Salvar</button>
-                        {% if pos.underlying and pos.ticker and pos.ticker != pos.underlying %}
+                        {% if pos.is_option and pos.side == 'short' %}
                           {% if pos.premium_recorded %}
                             <span class="badge text-bg-secondary align-self-center">Prêmio ok</span>
                           {% else %}
@@ -366,17 +366,15 @@
                               Registrar prêmio
                             </button>
                           {% endif %}
-                          {% if pos.side == 'short' %}
-                            <button
-                              class="btn btn-outline-warning btn-sm"
-                              type="submit"
-                              formaction="/positions/recalc-premium/{{ pos.id }}"
-                              formmethod="post"
-                              onclick="return confirm('Recalcular prêmio/DARF de {{ pos.ticker }} com base em preço, qtd e taxas?');"
-                            >
-                              Recalcular prêmio/DARF
-                            </button>
-                          {% endif %}
+                          <button
+                            class="btn btn-outline-warning btn-sm"
+                            type="submit"
+                            formaction="/positions/recalc-premium/{{ pos.id }}"
+                            formmethod="post"
+                            onclick="return confirm('Recalcular prêmio/DARF de {{ pos.ticker }} com base em preço, qtd e taxas?');"
+                          >
+                            Recalcular prêmio/DARF
+                          </button>
                         {% endif %}
                       </div>
                       <div class="mb-1">

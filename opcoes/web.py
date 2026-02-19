@@ -485,18 +485,27 @@ def create_app() -> Flask:
             positions_all = [p for p in positions_all if bool(p.get("is_simulated")) == is_simulated]
 
         ledger_sums = finance.get_ledger_sums_by_position(
-            types=[finance.TransactionType.PREMIUM, finance.TransactionType.DARF],
+            types=[finance.TransactionType.PREMIUM, finance.TransactionType.DARF, finance.TransactionType.BUY],
             is_simulated=is_simulated,
         )
+
+        def _money_diff(actual: Optional[float], expected: Optional[float]) -> Optional[float]:
+            if actual is None and expected is None:
+                return None
+            return round(float(actual or 0.0) - float(expected or 0.0), 2)
 
         rows = []
         totals = {
             "expected_premium": 0.0,
             "expected_darf": 0.0,
+            "expected_buyback": 0.0,
             "actual_premium": 0.0,
             "actual_darf": 0.0,
+            "actual_buyback": 0.0,
             "expected_net": 0.0,
             "actual_net": 0.0,
+            "expected_cash_net": 0.0,
+            "actual_cash_net": 0.0,
         }
 
         for pos in positions_all:
@@ -506,15 +515,21 @@ def create_app() -> Flask:
             pid = int(pos.get("id") or 0)
             ticker = (pos.get("ticker") or "").strip()
             underlying = (pos.get("underlying") or "").strip()
-            is_option = bool(ticker and underlying and ticker.upper() != underlying.upper())
+            is_option = _is_option_ticker(ticker)
             side = (pos.get("side") or "").strip().lower()
             trade_type = (pos.get("trade_type") or "swing").strip().lower()
             entry_price = float(pos.get("entry_price") or 0.0)
             qty = int(pos.get("qty") or 0)
             fees = float(pos.get("fees") or 0.0)
+            partial_qty = int(pos.get("partial_qty") or 0)
+            close_qty = max(qty - partial_qty, 0)
+            status_norm = (pos.get("status") or "").strip().lower()
+            exit_price_raw = pos.get("exit_price")
+            exit_price = float(exit_price_raw) if exit_price_raw is not None else None
 
             expected_premium = None
             expected_darf = None
+            expected_buyback = None
             if is_option and side == "short":
                 expected_premium = finance.calculate_option_premium(
                     entry_price=entry_price,
@@ -525,19 +540,32 @@ def create_app() -> Flask:
                     premium_amount=expected_premium,
                     trade_type=trade_type,
                 )
+                if status_norm == "closed" and exit_price is not None and close_qty > 0:
+                    expected_buyback = -round(float(exit_price) * int(close_qty), 2)
 
             actual_premium = ledger_sums.get(pid, {}).get(finance.TransactionType.PREMIUM.value)
             actual_darf = ledger_sums.get(pid, {}).get(finance.TransactionType.DARF.value)
+            actual_buyback = ledger_sums.get(pid, {}).get(finance.TransactionType.BUY.value)
 
-            if expected_premium is None and actual_premium is None and actual_darf is None:
+            if (
+                expected_premium is None
+                and actual_premium is None
+                and actual_darf is None
+                and expected_buyback is None
+                and actual_buyback is None
+            ):
                 continue
 
             expected_net = None
             actual_net = None
+            expected_cash_net = None
+            actual_cash_net = None
             if expected_premium is not None or expected_darf is not None:
                 expected_net = float(expected_premium or 0.0) + float(expected_darf or 0.0)
+                expected_cash_net = expected_net + float(expected_buyback or 0.0)
             if actual_premium is not None or actual_darf is not None:
                 actual_net = float(actual_premium or 0.0) + float(actual_darf or 0.0)
+                actual_cash_net = actual_net + float(actual_buyback or 0.0)
 
             rows.append(
                 {
@@ -552,19 +580,19 @@ def create_app() -> Flask:
                     "trade_type": trade_type,
                     "expected_premium": expected_premium,
                     "expected_darf": expected_darf,
+                    "expected_buyback": expected_buyback,
                     "actual_premium": actual_premium,
                     "actual_darf": actual_darf,
-                    "diff_premium": (actual_premium or 0.0) - (expected_premium or 0.0)
-                    if expected_premium is not None or actual_premium is not None
-                    else None,
-                    "diff_darf": (actual_darf or 0.0) - (expected_darf or 0.0)
-                    if expected_darf is not None or actual_darf is not None
-                    else None,
+                    "actual_buyback": actual_buyback,
+                    "diff_premium": _money_diff(actual_premium, expected_premium),
+                    "diff_darf": _money_diff(actual_darf, expected_darf),
+                    "diff_buyback": _money_diff(actual_buyback, expected_buyback),
                     "expected_net": expected_net,
                     "actual_net": actual_net,
-                    "diff_net": (actual_net or 0.0) - (expected_net or 0.0)
-                    if expected_net is not None or actual_net is not None
-                    else None,
+                    "diff_net": _money_diff(actual_net, expected_net),
+                    "expected_cash_net": expected_cash_net,
+                    "actual_cash_net": actual_cash_net,
+                    "diff_cash_net": _money_diff(actual_cash_net, expected_cash_net),
                 }
             )
 
@@ -572,13 +600,19 @@ def create_app() -> Flask:
                 totals["expected_premium"] += float(expected_premium or 0.0)
             if expected_darf is not None:
                 totals["expected_darf"] += float(expected_darf or 0.0)
+            if expected_buyback is not None:
+                totals["expected_buyback"] += float(expected_buyback or 0.0)
             if actual_premium is not None:
                 totals["actual_premium"] += float(actual_premium or 0.0)
             if actual_darf is not None:
                 totals["actual_darf"] += float(actual_darf or 0.0)
+            if actual_buyback is not None:
+                totals["actual_buyback"] += float(actual_buyback or 0.0)
 
         totals["expected_net"] = totals["expected_premium"] + totals["expected_darf"]
         totals["actual_net"] = totals["actual_premium"] + totals["actual_darf"]
+        totals["expected_cash_net"] = totals["expected_net"] + totals["expected_buyback"]
+        totals["actual_cash_net"] = totals["actual_net"] + totals["actual_buyback"]
 
         position_ids = {int(p.get("id") or 0) for p in positions_all}
         orphan_rows = [
@@ -586,11 +620,20 @@ def create_app() -> Flask:
                 "id": pid,
                 "actual_premium": sums.get(finance.TransactionType.PREMIUM.value),
                 "actual_darf": sums.get(finance.TransactionType.DARF.value),
+                "actual_buyback": sums.get(finance.TransactionType.BUY.value),
                 "actual_net": (sums.get(finance.TransactionType.PREMIUM.value) or 0.0)
                 + (sums.get(finance.TransactionType.DARF.value) or 0.0),
+                "actual_cash_net": (sums.get(finance.TransactionType.PREMIUM.value) or 0.0)
+                + (sums.get(finance.TransactionType.DARF.value) or 0.0)
+                + (sums.get(finance.TransactionType.BUY.value) or 0.0),
             }
             for pid, sums in ledger_sums.items()
             if pid not in position_ids
+            and (
+                sums.get(finance.TransactionType.PREMIUM.value) is not None
+                or sums.get(finance.TransactionType.DARF.value) is not None
+                or sums.get(finance.TransactionType.BUY.value) is not None
+            )
         ]
 
         return render_template(
@@ -643,8 +686,7 @@ def create_app() -> Flask:
         # Registro opcional: prêmio no caixa (venda) + provisão DARF (saldo limpo).
         if entry_price > 0 and qty > 0 and form.get("record_premium") == "1":
             t = (ticker or "").strip().upper()
-            u = (underlying or "").strip().upper()
-            is_option = bool(u) and t and t != u
+            is_option = _is_option_ticker(t)
 
             if is_option:
                 total_premium = finance.calculate_option_premium(
@@ -691,7 +733,11 @@ def create_app() -> Flask:
         underlying = (pos.get("underlying") or "").strip()
         if not underlying:
             underlying = _lookup_underlying_from_snapshot(ticker) or ""
-        if not ticker or not underlying or ticker.upper() == underlying.upper():
+        if not ticker or not _is_option_ticker(ticker):
+            return redirect(next_url)
+
+        side = (pos.get("side") or "").strip().lower()
+        if side != "short":
             return redirect(next_url)
 
         try:
@@ -761,8 +807,7 @@ def create_app() -> Flask:
             return redirect(next_url)
 
         ticker = (pos.get("ticker") or "").strip()
-        underlying = (pos.get("underlying") or "").strip()
-        if not ticker or not underlying or ticker.upper() == underlying.upper():
+        if not ticker or not _is_option_ticker(ticker):
             return redirect(next_url)
 
         side = (pos.get("side") or "").strip().lower()
@@ -840,6 +885,22 @@ def create_app() -> Flask:
             parent_position_id=parent_id,
             strategy_tag=form.get("strategy_tag") or None,
         )
+        ticker = (form.get("ticker") or "").strip().upper()
+        side = (side_raw or "").strip().lower()
+        if _is_option_ticker(ticker) and side == "short":
+            qty_val = int(form["qty"]) if form.get("qty") else 0
+            partial_qty_val = int(form["partial_qty"]) if form.get("partial_qty") else None
+            is_simulated_flag = form.get("is_simulated") == "1"
+            finance.sync_short_option_buyback(
+                position_id=position_id,
+                ticker=ticker,
+                qty=qty_val,
+                partial_qty=partial_qty_val,
+                status=status,
+                exit_date=form.get("exit_date") or None,
+                exit_price=_parse_form_float(form.get("exit_price")) if form.get("exit_price") else None,
+                is_simulated=is_simulated_flag,
+            )
         return redirect(_safe_next_url(form.get("next")) or url_for("positions"))
 
     @app.post("/positions/delete/<int:position_id>")
@@ -899,6 +960,9 @@ def create_app() -> Flask:
         if not candidate.startswith("/positions"):
             return None
         return candidate
+
+    def _is_option_ticker(ticker: str | None) -> bool:
+        return infer_option_type(ticker or "") in {"CALL", "PUT"}
 
     def _lookup_option_strike(ticker: str) -> float | None:
         """Recupera o strike do ticker de opção a partir do último snapshot."""

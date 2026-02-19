@@ -436,6 +436,94 @@ def recalc_position_premium_and_darf(
             db.close()
 
 
+def sync_short_option_buyback(
+    *,
+    position_id: int,
+    ticker: str,
+    qty: int,
+    partial_qty: Optional[int],
+    status: Optional[str],
+    exit_date: Optional[str],
+    exit_price: Optional[float],
+    is_simulated: bool,
+    conn: Optional[sqlite3.Connection] = None,
+) -> float:
+    """Sincroniza a recompra de encerramento (BUY) para opção vendida."""
+
+    db, owns_conn = _resolve_conn(conn)
+    try:
+        cur = db.execute(
+            """
+            SELECT id
+            FROM ledger
+            WHERE position_id = ?
+              AND type = ?
+              AND COALESCE(description, '') LIKE 'Recompra opção %'
+            ORDER BY id ASC
+            """,
+            (int(position_id), TransactionType.BUY.value),
+        )
+        existing_ids = [int(r["id"]) for r in cur.fetchall()]
+
+        is_closed = (status or "").strip().lower() == "closed"
+        close_qty = max(int(qty or 0) - int(partial_qty or 0), 0)
+        close_date = (exit_date or "").strip()
+        close_price = float(exit_price or 0.0)
+        should_have = is_closed and bool(close_date) and close_qty > 0 and close_price > 0.0
+
+        if not should_have:
+            if existing_ids:
+                db.execute(
+                    f"DELETE FROM ledger WHERE id IN ({','.join('?' for _ in existing_ids)})",
+                    existing_ids,
+                )
+            if owns_conn:
+                db.commit()
+            return 0.0
+
+        amount = -round(close_price * close_qty, 2)
+        description = f"Recompra opção {ticker} ({close_qty}x)"
+
+        if existing_ids:
+            db.execute(
+                """
+                UPDATE ledger
+                SET date = ?, amount = ?, description = ?, is_simulated = ?
+                WHERE id = ?
+                """,
+                (
+                    close_date,
+                    amount,
+                    description,
+                    1 if is_simulated else 0,
+                    existing_ids[0],
+                ),
+            )
+            extra_ids = existing_ids[1:]
+            if extra_ids:
+                db.execute(
+                    f"DELETE FROM ledger WHERE id IN ({','.join('?' for _ in extra_ids)})",
+                    extra_ids,
+                )
+        else:
+            add_transaction(
+                date=close_date,
+                type=TransactionType.BUY,
+                amount=amount,
+                description=description,
+                position_id=position_id,
+                is_simulated=is_simulated,
+                conn=db,
+            )
+
+        if owns_conn:
+            db.commit()
+        return amount
+    finally:
+        if owns_conn:
+            db.close()
+
+
 def get_premium_position_ids(position_ids: Optional[List[int]] = None) -> set[int]:
     if position_ids is not None and not position_ids:
         return set()

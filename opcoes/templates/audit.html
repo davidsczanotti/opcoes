@@ -101,7 +101,7 @@
         <div class="col-md-4">
           <div class="card h-100 border-primary">
             <div class="card-body">
-              <div class="text-muted small">Líquido (Prêmio + DARF)</div>
+              <div class="text-muted small">Líquido fiscal (Prêmio + DARF)</div>
               <div class="d-flex justify-content-between">
                 <span>Esperado</span>
                 <strong>R$ {{ "%.2f"|format(totals.expected_net) }}</strong>
@@ -116,6 +116,59 @@
                 <strong class="{% if diff_n != 0 %}text-danger{% else %}text-success{% endif %}">
                   R$ {{ "%.2f"|format(diff_n) }}
                 </strong>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3 mb-4">
+        <div class="col-md-6">
+          <div class="card h-100">
+            <div class="card-body">
+              <div class="text-muted small">Recompra (caixa)</div>
+              <div class="d-flex justify-content-between">
+                <span>Esperado</span>
+                <strong>R$ {{ "%.2f"|format(totals.expected_buyback) }}</strong>
+              </div>
+              <div class="d-flex justify-content-between">
+                <span>No caixa</span>
+                <strong>R$ {{ "%.2f"|format(totals.actual_buyback) }}</strong>
+              </div>
+              <div class="d-flex justify-content-between">
+                <span>Diferença</span>
+                {% set diff_b = totals.actual_buyback - totals.expected_buyback %}
+                <strong class="{% if diff_b != 0 %}text-danger{% else %}text-success{% endif %}">
+                  R$ {{ "%.2f"|format(diff_b) }}
+                </strong>
+              </div>
+              <div class="text-muted small mt-2">
+                Considera lançamento `BUY` de recompra de opção vendida ao encerrar.
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div class="card h-100 border-primary">
+            <div class="card-body">
+              <div class="text-muted small">Líquido operação (Prêmio + DARF + Recompra)</div>
+              <div class="d-flex justify-content-between">
+                <span>Esperado</span>
+                <strong>R$ {{ "%.2f"|format(totals.expected_cash_net) }}</strong>
+              </div>
+              <div class="d-flex justify-content-between">
+                <span>No caixa</span>
+                <strong>R$ {{ "%.2f"|format(totals.actual_cash_net) }}</strong>
+              </div>
+              <div class="d-flex justify-content-between">
+                <span>Diferença</span>
+                {% set diff_cn = totals.actual_cash_net - totals.expected_cash_net %}
+                <strong class="{% if diff_cn != 0 %}text-danger{% else %}text-success{% endif %}">
+                  R$ {{ "%.2f"|format(diff_cn) }}
+                </strong>
+              </div>
+              <div class="text-muted small mt-2">
+                Visão didática para cliente: mostra o efeito real da operação no caixa.
               </div>
             </div>
           </div>
@@ -139,19 +192,27 @@
               <th class="text-end">DARF esp.</th>
               <th class="text-end">DARF caixa</th>
               <th class="text-end">Dif. DARF</th>
-              <th class="text-end">Líquido esp.</th>
-              <th class="text-end">Líquido caixa</th>
-              <th class="text-end">Dif. líquido</th>
+              <th class="text-end">Recompra esp.</th>
+              <th class="text-end">Recompra caixa</th>
+              <th class="text-end">Dif. recompra</th>
+              <th class="text-end">Líquido fiscal esp.</th>
+              <th class="text-end">Líquido fiscal caixa</th>
+              <th class="text-end">Dif. fiscal</th>
+              <th class="text-end">Líquido operação esp.</th>
+              <th class="text-end">Líquido operação caixa</th>
+              <th class="text-end">Dif. operação</th>
             </tr>
           </thead>
           <tbody>
             {% if not rows %}
-              <tr><td colspan="16" class="text-muted text-center">Nenhum dado para auditar.</td></tr>
+              <tr><td colspan="22" class="text-muted text-center">Nenhum dado para auditar.</td></tr>
             {% else %}
               {% for r in rows %}
                 {% set dp = r.diff_premium or 0 %}
                 {% set dd = r.diff_darf or 0 %}
-                {% set dn = r.diff_net or 0 %}
+                {% set db = r.diff_buyback or 0 %}
+                {% set dnf = r.diff_net or 0 %}
+                {% set dnc = r.diff_cash_net or 0 %}
                 <tr>
                   <td>{{ r.id }}</td>
                   <td>{{ r.ticker }}</td>
@@ -179,13 +240,31 @@
                     {% if r.diff_darf is not none %}{{ "%.2f"|format(r.diff_darf) }}{% else %}-{% endif %}
                   </td>
                   <td class="text-end">
+                    {% if r.expected_buyback is not none %}{{ "%.2f"|format(r.expected_buyback) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if r.actual_buyback is not none %}{{ "%.2f"|format(r.actual_buyback) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end {% if db != 0 %}text-danger{% else %}text-success{% endif %}">
+                    {% if r.diff_buyback is not none %}{{ "%.2f"|format(r.diff_buyback) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
                     {% if r.expected_net is not none %}{{ "%.2f"|format(r.expected_net) }}{% else %}-{% endif %}
                   </td>
                   <td class="text-end">
                     {% if r.actual_net is not none %}{{ "%.2f"|format(r.actual_net) }}{% else %}-{% endif %}
                   </td>
-                  <td class="text-end {% if dn != 0 %}text-danger{% else %}text-success{% endif %}">
+                  <td class="text-end {% if dnf != 0 %}text-danger{% else %}text-success{% endif %}">
                     {% if r.diff_net is not none %}{{ "%.2f"|format(r.diff_net) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if r.expected_cash_net is not none %}{{ "%.2f"|format(r.expected_cash_net) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end">
+                    {% if r.actual_cash_net is not none %}{{ "%.2f"|format(r.actual_cash_net) }}{% else %}-{% endif %}
+                  </td>
+                  <td class="text-end {% if dnc != 0 %}text-danger{% else %}text-success{% endif %}">
+                    {% if r.diff_cash_net is not none %}{{ "%.2f"|format(r.diff_cash_net) }}{% else %}-{% endif %}
                   </td>
                 </tr>
               {% endfor %}
@@ -196,7 +275,7 @@
 
       {% if orphan_rows %}
         <div class="alert alert-warning small">
-          Há lançamentos de prêmio/DARF no caixa sem posição encontrada.
+          Há lançamentos de prêmio/DARF/recompra no caixa sem posição encontrada.
         </div>
         <div class="table-responsive mb-4">
           <table class="table table-sm table-striped align-middle">
@@ -205,7 +284,9 @@
                 <th>Position ID</th>
                 <th class="text-end">Prêmio caixa</th>
                 <th class="text-end">DARF caixa</th>
-                <th class="text-end">Líquido caixa</th>
+                <th class="text-end">Recompra caixa</th>
+                <th class="text-end">Líquido fiscal</th>
+                <th class="text-end">Líquido operação</th>
               </tr>
             </thead>
             <tbody>
@@ -214,7 +295,9 @@
                   <td>{{ r.id }}</td>
                   <td class="text-end">{{ "%.2f"|format(r.actual_premium or 0.0) }}</td>
                   <td class="text-end">{{ "%.2f"|format(r.actual_darf or 0.0) }}</td>
+                  <td class="text-end">{{ "%.2f"|format(r.actual_buyback or 0.0) }}</td>
                   <td class="text-end">{{ "%.2f"|format(r.actual_net or 0.0) }}</td>
+                  <td class="text-end">{{ "%.2f"|format(r.actual_cash_net or 0.0) }}</td>
                 </tr>
               {% endfor %}
             </tbody>
@@ -223,8 +306,8 @@
       {% endif %}
 
       <p class="text-muted small">
-        Este relatório compara prêmio/DARF esperado (pela posição) com o que foi lançado no caixa.
-        Recompras, exercícios e compras/vendas de ações não entram aqui.
+        Este relatório traz duas leituras: fiscal (`Prêmio + DARF`) e caixa da operação
+        (`Prêmio + DARF + Recompra`). Exercícios e compras/vendas de ações continuam fora deste painel.
       </p>
     </div>
 

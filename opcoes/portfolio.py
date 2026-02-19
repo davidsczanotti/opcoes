@@ -5,7 +5,7 @@ from typing import Iterable, List, Optional
 
 from .config import get_db_path
 from .scraper.storage import _ensure_parent
-from .utils import parse_ptbr_number
+from .utils import infer_option_type, parse_ptbr_number
 
 
 def _connect() -> sqlite3.Connection:
@@ -524,6 +524,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
         "id": row["id"],
         "ticker": row["ticker"],
         "underlying": row["underlying"],
+        "is_option": infer_option_type(row["ticker"]) in {"CALL", "PUT"},
         "trade_date": row["trade_date"],
         "qty": qty,
         "open_qty": open_qty,
